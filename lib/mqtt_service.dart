@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -11,7 +12,7 @@ class SensorThresholdConfig {
   String unit;
   double threshold;
   double hysteresisPercent; // 2% .. 35%
-  bool alertWhenHigh;       // true: тревога при превышении (>, напр. MQ135, T внутри), false: тревога при падении (<, напр. Почва)
+  bool alertWhenHigh;       // true: >, false: <
   double minLimit;
   double maxLimit;
 
@@ -80,7 +81,10 @@ class AutomationRule {
 
 class GreenhouseMqttService extends ChangeNotifier {
   MqttServerClient? _client;
+  StreamSubscription? _updatesSubscription;
   bool isConnected = false;
+
+  static const Duration modeHoldDuration = Duration(milliseconds: 1500);
 
   String broker = 'your-cluster.s1.eu.hivemq.cloud';
   int port = 8883;
@@ -97,23 +101,29 @@ class GreenhouseMqttService extends ChangeNotifier {
   double voltage = 12.4;
 
   double timeOfDayHours = 14.5;
+  String rtcTimeString = '14:30';
 
-  // 4 сервопривода SG90
-  double roofLeftAngle = 45.0;
-  double roofRightAngle = 45.0;
-  double doorFrontAngle = 30.0;
+  // 4 сервопривода SG90 (полный диапазон 0-180°)
+  double roofLeftAngle = 0.0;
+  double roofRightAngle = 0.0;
+  double doorFrontAngle = 0.0;
   double doorBackAngle = 0.0;
 
-  double maxRoofAngleLimit = 75.0;
-  double maxDoorAngleLimit = 85.0;
+  double maxRoofAngleLimit = 180.0;
+  double maxDoorAngleLimit = 180.0;
 
   bool isWateringActive = false;
   bool isPhytoLightActive = true;
   bool isWhiteLightActive = false;
+  bool isAutoModeActive = true;
+
+  bool isPendingWatering = false;
+  bool isPendingPhyto = false;
+  bool isPendingWhite = false;
+  bool isPendingMode = false;
 
   bool isDeveloperUnlocked = false;
 
-  // Настройки порогов и гистерезиса для каждого датчика (доступны без пароля!)
   late Map<String, SensorThresholdConfig> sensorConfigs;
 
   final List<String> eventLogs = [
@@ -166,7 +176,12 @@ class GreenhouseMqttService extends ChangeNotifier {
 
   GreenhouseMqttService() {
     _initDefaultThresholds();
-    _loadFromCache();
+    _initService();
+  }
+
+  Future<void> _initService() async {
+    await _loadFromCache();
+    await connect();
   }
 
   void _initDefaultThresholds() {
@@ -187,7 +202,7 @@ class GreenhouseMqttService extends ChangeNotifier {
         unit: '°C',
         threshold: 10.0,
         hysteresisPercent: 20.0,
-        alertWhenHigh: false, // тревога при похолодании ниже порога
+        alertWhenHigh: false,
         minLimit: -15.0,
         maxLimit: 40.0,
       ),
@@ -197,7 +212,7 @@ class GreenhouseMqttService extends ChangeNotifier {
         unit: ' лк',
         threshold: 300.0,
         hysteresisPercent: 20.0,
-        alertWhenHigh: false, // тревога когда темнеет ниже порога
+        alertWhenHigh: false,
         minLimit: 50.0,
         maxLimit: 1000.0,
       ),
@@ -207,7 +222,7 @@ class GreenhouseMqttService extends ChangeNotifier {
         unit: ' ppm',
         threshold: 1000.0,
         hysteresisPercent: 20.0,
-        alertWhenHigh: true, // тревога при превышении порога ppm
+        alertWhenHigh: true,
         minLimit: 400.0,
         maxLimit: 2000.0,
       ),
@@ -217,14 +232,13 @@ class GreenhouseMqttService extends ChangeNotifier {
         unit: '%',
         threshold: 35.0,
         hysteresisPercent: 20.0,
-        alertWhenHigh: false, // тревога при пересыхании ниже порога
+        alertWhenHigh: false,
         minLimit: 10.0,
         maxLimit: 90.0,
       ),
     };
   }
 
-  // Расчет уровня тревоги (0 = Норма, 1 = Желтый, 2 = Темно-оранжевый, 3 = Красный)
   int getAlertStage(String key) {
     final cfg = sensorConfigs[key];
     if (cfg == null) return 0;
@@ -235,48 +249,43 @@ class GreenhouseMqttService extends ChangeNotifier {
     if (key == 'co2') val = co2Level.toDouble();
     if (key == 'soilMoisture') val = soilMoisture;
 
-    // Ширина зоны предтревоги (гистерезиса) в единицах датчика
     final double hystSpan =
         (cfg.threshold.abs() * (cfg.hysteresisPercent / 100.0)).clamp(1.0, 600.0);
 
     if (cfg.alertWhenHigh) {
-      // Тревога по ВЕРХНЕМУ пределу (например, MQ135 или жара)
-      if (val >= cfg.threshold) return 3; // Красный (вышло за предел!)
-      if (val >= cfg.threshold - hystSpan * 0.5) return 2; // Темно-оранжевый
-      if (val >= cfg.threshold - hystSpan) return 1; // Желтый (подходит к порогу)
+      if (val >= cfg.threshold) return 3;
+      if (val >= cfg.threshold - hystSpan * 0.5) return 2;
+      if (val >= cfg.threshold - hystSpan) return 1;
       return 0;
     } else {
-      // Тревога по НИЖНЕМУ пределу (например, влажность почвы или холод на улице)
-      if (val <= cfg.threshold) return 3; // Красный (вышло за предел!)
-      if (val <= cfg.threshold + hystSpan * 0.5) return 2; // Темно-оранжевый
-      if (val <= cfg.threshold + hystSpan) return 1; // Желтый (подходит к порогу)
+      if (val <= cfg.threshold) return 3;
+      if (val <= cfg.threshold + hystSpan * 0.5) return 2;
+      if (val <= cfg.threshold + hystSpan) return 1;
       return 0;
     }
   }
 
-  // Цвет для ЗНАЧЕНИЯ датчика (Белый -> Желтый -> Темно-оранжевый -> Красный)
   Color getSensorValueColor(String key) {
     switch (getAlertStage(key)) {
       case 1:
-        return const Color(0xFFFFD54F); // Желтый
+        return const Color(0xFFFFD54F);
       case 2:
-        return const Color(0xFFFF6D00); // Темно-оранжевый
+        return const Color(0xFFFF6D00);
       case 3:
-        return const Color(0xFFFF3D00); // Красный
+        return const Color(0xFFFF3D00);
       default:
         return Colors.white;
     }
   }
 
-  // Цвет для ТЕКСТА ПОДПИСИ датчика (Серый -> Желтый -> Темно-оранжевый -> Красный)
   Color getSensorLabelColor(String key) {
     switch (getAlertStage(key)) {
       case 1:
-        return const Color(0xFFFFD54F); // Желтый
+        return const Color(0xFFFFD54F);
       case 2:
-        return const Color(0xFFFF6D00); // Темно-оранжевый
+        return const Color(0xFFFF6D00);
       case 3:
-        return const Color(0xFFFF3D00); // Красный
+        return const Color(0xFFFF3D00);
       default:
         return Colors.white54;
     }
@@ -294,6 +303,7 @@ class GreenhouseMqttService extends ChangeNotifier {
     cfg.hysteresisPercent = hysteresisPercent.clamp(2.0, 35.0);
     cfg.alertWhenHigh = alertWhenHigh;
 
+    _publish('greenhouse/config/threshold/$key', jsonEncode(cfg.toJson()));
     addLog(
         'Порог ${cfg.name}: ${cfg.alertWhenHigh ? ">" : "<"} ${cfg.threshold.toInt()}${cfg.unit} (Гистерезис ${cfg.hysteresisPercent.toInt()}%)');
     saveToCache();
@@ -320,14 +330,14 @@ class GreenhouseMqttService extends ChangeNotifier {
     voltage = prefs.getDouble('voltage') ?? 12.4;
     timeOfDayHours = prefs.getDouble('timeOfDayHours') ?? 14.5;
 
-    maxRoofAngleLimit = prefs.getDouble('maxRoofAngleLimit') ?? 75.0;
-    maxDoorAngleLimit = prefs.getDouble('maxDoorAngleLimit') ?? 85.0;
+    maxRoofAngleLimit = prefs.getDouble('maxRoofAngleLimit') ?? 180.0;
+    maxDoorAngleLimit = prefs.getDouble('maxDoorAngleLimit') ?? 180.0;
 
     roofLeftAngle =
-        (prefs.getDouble('roofLeftAngle') ?? 45.0).clamp(0.0, maxRoofAngleLimit);
-    roofRightAngle = (prefs.getDouble('roofRightAngle') ?? 45.0)
+        (prefs.getDouble('roofLeftAngle') ?? 0.0).clamp(0.0, maxRoofAngleLimit);
+    roofRightAngle = (prefs.getDouble('roofRightAngle') ?? 0.0)
         .clamp(0.0, maxRoofAngleLimit);
-    doorFrontAngle = (prefs.getDouble('doorFrontAngle') ?? 30.0)
+    doorFrontAngle = (prefs.getDouble('doorFrontAngle') ?? 0.0)
         .clamp(0.0, maxDoorAngleLimit);
     doorBackAngle =
         (prefs.getDouble('doorBackAngle') ?? 0.0).clamp(0.0, maxDoorAngleLimit);
@@ -335,9 +345,11 @@ class GreenhouseMqttService extends ChangeNotifier {
     isWateringActive = prefs.getBool('isWateringActive') ?? false;
     isPhytoLightActive = prefs.getBool('isPhytoLightActive') ?? true;
     isWhiteLightActive = prefs.getBool('isWhiteLightActive') ?? false;
+    isAutoModeActive = prefs.getBool('isAutoModeActive') ?? true;
 
     broker = prefs.getString('broker') ?? broker;
     username = prefs.getString('username') ?? username;
+    password = prefs.getString('password') ?? password;
 
     final savedThresholds = prefs.getString('sensor_thresholds');
     if (savedThresholds != null) {
@@ -388,9 +400,11 @@ class GreenhouseMqttService extends ChangeNotifier {
     await prefs.setBool('isWateringActive', isWateringActive);
     await prefs.setBool('isPhytoLightActive', isPhytoLightActive);
     await prefs.setBool('isWhiteLightActive', isWhiteLightActive);
+    await prefs.setBool('isAutoModeActive', isAutoModeActive);
 
     await prefs.setString('broker', broker);
     await prefs.setString('username', username);
+    await prefs.setString('password', password);
 
     final Map<String, dynamic> threshMap = {};
     sensorConfigs.forEach((k, v) => threshMap[k] = v.toJson());
@@ -402,71 +416,106 @@ class GreenhouseMqttService extends ChangeNotifier {
     );
   }
 
-  // ==================== УПРАВЛЕНИЕ 4 СЕРВОПРИВОДАМИ ====================
+  // ==================== УПРАВЛЕНИЕ 4 СЕРВОПРИВОДАМИ (0-180°) ====================
   void setRoofLeftAngle(double angle, {bool log = false}) {
-    roofLeftAngle = angle.clamp(0.0, maxRoofAngleLimit);
+    final target = angle.clamp(0.0, maxRoofAngleLimit);
     if (log) {
-      _publish('greenhouse/servo/roof_left', roofLeftAngle.toInt().toString());
-      addLog('Левое окно: ${roofLeftAngle.toInt()}°');
-      saveToCache();
+      _publish('greenhouse/servo/roof_left/set', target.toInt().toString());
+      addLog('Запрос: Левое окно → ${target.toInt()}°');
+      if (!isConnected || kIsWeb) {
+        roofLeftAngle = target;
+        saveToCache();
+      }
+    } else {
+      roofLeftAngle = target;
     }
     notifyListeners();
   }
 
   void setRoofRightAngle(double angle, {bool log = false}) {
-    roofRightAngle = angle.clamp(0.0, maxRoofAngleLimit);
+    final target = angle.clamp(0.0, maxRoofAngleLimit);
     if (log) {
-      _publish('greenhouse/servo/roof_right', roofRightAngle.toInt().toString());
-      addLog('Правое окно: ${roofRightAngle.toInt()}°');
-      saveToCache();
+      _publish('greenhouse/servo/roof_right/set', target.toInt().toString());
+      addLog('Запрос: Правое окно → ${target.toInt()}°');
+      if (!isConnected || kIsWeb) {
+        roofRightAngle = target;
+        saveToCache();
+      }
+    } else {
+      roofRightAngle = target;
     }
     notifyListeners();
   }
 
   void setDoorFrontAngle(double angle, {bool log = false}) {
-    doorFrontAngle = angle.clamp(0.0, maxDoorAngleLimit);
+    final target = angle.clamp(0.0, maxDoorAngleLimit);
     if (log) {
-      _publish('greenhouse/servo/door_front', doorFrontAngle.toInt().toString());
-      addLog('Передняя дверь: ${doorFrontAngle.toInt()}°');
-      saveToCache();
+      _publish('greenhouse/servo/door_front/set', target.toInt().toString());
+      addLog('Запрос: Передняя дверь → ${target.toInt()}°');
+      if (!isConnected || kIsWeb) {
+        doorFrontAngle = target;
+        saveToCache();
+      }
+    } else {
+      doorFrontAngle = target;
     }
     notifyListeners();
   }
 
   void setDoorBackAngle(double angle, {bool log = false}) {
-    doorBackAngle = angle.clamp(0.0, maxDoorAngleLimit);
+    final target = angle.clamp(0.0, maxDoorAngleLimit);
     if (log) {
-      _publish('greenhouse/servo/door_back', doorBackAngle.toInt().toString());
-      addLog('Задняя дверь: ${doorBackAngle.toInt()}°');
-      saveToCache();
+      _publish('greenhouse/servo/door_back/set', target.toInt().toString());
+      addLog('Запрос: Задняя дверь → ${target.toInt()}°');
+      if (!isConnected || kIsWeb) {
+        doorBackAngle = target;
+        saveToCache();
+      }
+    } else {
+      doorBackAngle = target;
     }
     notifyListeners();
   }
 
   void openAllServos() {
-    roofLeftAngle = maxRoofAngleLimit;
-    roofRightAngle = maxRoofAngleLimit;
-    doorFrontAngle = maxDoorAngleLimit;
-    doorBackAngle = maxDoorAngleLimit;
-    addLog(
-        'Открыты все приводы до лимита (${maxRoofAngleLimit.toInt()}° / ${maxDoorAngleLimit.toInt()}°)');
-    saveToCache();
+    final rMax = maxRoofAngleLimit.toInt().toString();
+    final dMax = maxDoorAngleLimit.toInt().toString();
+    _publish('greenhouse/servo/roof_left/set', rMax);
+    _publish('greenhouse/servo/roof_right/set', rMax);
+    _publish('greenhouse/servo/door_front/set', dMax);
+    _publish('greenhouse/servo/door_back/set', dMax);
+    addLog('Запрос: Открыть все приводы ($rMax° / $dMax°)');
+
+    if (!isConnected || kIsWeb) {
+      roofLeftAngle = maxRoofAngleLimit;
+      roofRightAngle = maxRoofAngleLimit;
+      doorFrontAngle = maxDoorAngleLimit;
+      doorBackAngle = maxDoorAngleLimit;
+      saveToCache();
+    }
     notifyListeners();
   }
 
   void closeAllServos() {
-    roofLeftAngle = 0;
-    roofRightAngle = 0;
-    doorFrontAngle = 0;
-    doorBackAngle = 0;
-    addLog('Все окна и двери закрыты (0°)');
-    saveToCache();
+    _publish('greenhouse/servo/roof_left/set', '0');
+    _publish('greenhouse/servo/roof_right/set', '0');
+    _publish('greenhouse/servo/door_front/set', '0');
+    _publish('greenhouse/servo/door_back/set', '0');
+    addLog('Запрос: Закрыть все окна и двери (0°)');
+
+    if (!isConnected || kIsWeb) {
+      roofLeftAngle = 0;
+      roofRightAngle = 0;
+      doorFrontAngle = 0;
+      doorBackAngle = 0;
+      saveToCache();
+    }
     notifyListeners();
   }
 
   void setServoLimits(double newRoofMax, double newDoorMax) {
-    maxRoofAngleLimit = newRoofMax.clamp(10.0, 90.0);
-    maxDoorAngleLimit = newDoorMax.clamp(10.0, 90.0);
+    maxRoofAngleLimit = newRoofMax.clamp(10.0, 180.0);
+    maxDoorAngleLimit = newDoorMax.clamp(10.0, 180.0);
     roofLeftAngle = roofLeftAngle.clamp(0.0, maxRoofAngleLimit);
     roofRightAngle = roofRightAngle.clamp(0.0, maxRoofAngleLimit);
     doorFrontAngle = doorFrontAngle.clamp(0.0, maxDoorAngleLimit);
@@ -477,43 +526,82 @@ class GreenhouseMqttService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ==================== УПРАВЛЕНИЕ СВЕТОМ И ПОЛИВОМ ====================
+  // ==================== УПРАВЛЕНИЕ СВЕТОМ, ПОЛИВОМ И РЕЖИМОМ ====================
   void toggleWatering() {
-    isWateringActive = !isWateringActive;
-    _publish('greenhouse/pump/set', isWateringActive ? '1' : '0');
-    addLog(isWateringActive
-        ? 'Нижний прикорневой полив ВКЛЮЧЕН'
-        : 'Полив ВЫКЛЮЧЕН');
-    saveToCache();
+    final targetState = !isWateringActive;
+    _publish('greenhouse/pump/set', targetState ? '1' : '0', retain: false);
+
+    if (isConnected && !kIsWeb) {
+      isPendingWatering = true;
+      addLog('Ожидание отклика насоса от ESP32...');
+    } else {
+      isWateringActive = targetState;
+      addLog(isWateringActive ? 'Полив ВКЛЮЧЕН (демо)' : 'Полив ВЫКЛЮЧЕН (демо)');
+      saveToCache();
+    }
     notifyListeners();
   }
 
   void togglePhytoLight() {
-    isPhytoLightActive = !isPhytoLightActive;
-    _publish('greenhouse/light/phyto', isPhytoLightActive ? '1' : '0');
-    addLog(isPhytoLightActive ? 'Фито-лента ВКЛ' : 'Фито-лента ВЫКЛ');
-    saveToCache();
+    final targetState = !isPhytoLightActive;
+    _publish('greenhouse/light/phyto/set', targetState ? '1' : '0', retain: false);
+
+    if (isConnected && !kIsWeb) {
+      isPendingPhyto = true;
+      addLog('Ожидание отклика Фито-ленты от ESP32...');
+    } else {
+      isPhytoLightActive = targetState;
+      addLog(isPhytoLightActive ? 'Фито-лента ВКЛ (демо)' : 'Фито-лента ВЫКЛ (демо)');
+      saveToCache();
+    }
     notifyListeners();
   }
 
   void toggleWhiteLight() {
-    isWhiteLightActive = !isWhiteLightActive;
-    _publish('greenhouse/light/white', isWhiteLightActive ? '1' : '0');
-    addLog(isWhiteLightActive ? 'Белая LED-лента ВКЛ' : 'Белая LED-лента ВЫКЛ');
-    saveToCache();
+    final targetState = !isWhiteLightActive;
+    _publish('greenhouse/light/white/set', targetState ? '1' : '0', retain: false);
+
+    if (isConnected && !kIsWeb) {
+      isPendingWhite = true;
+      addLog('Ожидание отклика Белой ленты от ESP32...');
+    } else {
+      isWhiteLightActive = targetState;
+      addLog(isWhiteLightActive ? 'Белая LED-лента ВКЛ (демо)' : 'Белая LED-лента ВЫКЛ (демо)');
+      saveToCache();
+    }
     notifyListeners();
   }
 
   void toggleAllLights() {
     final bool anyOn = isPhytoLightActive || isWhiteLightActive;
-    isPhytoLightActive = !anyOn;
-    isWhiteLightActive = !anyOn;
-    _publish('greenhouse/light/phyto', isPhytoLightActive ? '1' : '0');
-    _publish('greenhouse/light/white', isWhiteLightActive ? '1' : '0');
-    addLog(!anyOn
-        ? 'Обе светодиодные ленты (Фито + Белая) ВКЛЮЧЕНЫ'
-        : 'Всё освещение теплицы ВЫКЛЮЧЕНО');
-    saveToCache();
+    final targetState = !anyOn;
+    _publish('greenhouse/light/phyto/set', targetState ? '1' : '0', retain: false);
+    _publish('greenhouse/light/white/set', targetState ? '1' : '0', retain: false);
+
+    if (isConnected && !kIsWeb) {
+      isPendingPhyto = true;
+      isPendingWhite = true;
+      addLog('Ожидание переключения освещения...');
+    } else {
+      isPhytoLightActive = targetState;
+      isWhiteLightActive = targetState;
+      saveToCache();
+    }
+    notifyListeners();
+  }
+
+  void toggleControlMode() {
+    final targetMode = !isAutoModeActive;
+    _publish('greenhouse/mode/set', targetMode ? 'auto' : 'manual', retain: false);
+
+    if (isConnected && !kIsWeb) {
+      isPendingMode = true;
+      addLog('Запрос смены режима → ${targetMode ? "АВТО" : "РУЧНОЙ"} (ждём ESP32)...');
+    } else {
+      isAutoModeActive = targetMode;
+      addLog('Режим изменен: ${isAutoModeActive ? "АВТО" : "РУЧНОЙ"} (демо)');
+      saveToCache();
+    }
     notifyListeners();
   }
 
@@ -603,23 +691,19 @@ class GreenhouseMqttService extends ChangeNotifier {
       if (triggered) {
         switch (rule.actionType) {
           case 'openVents':
-            roofLeftAngle = maxRoofAngleLimit;
-            roofRightAngle = maxRoofAngleLimit;
+            openAllServos();
             break;
           case 'closeVents':
-            roofLeftAngle = 0;
-            roofRightAngle = 0;
-            doorFrontAngle = 0;
-            doorBackAngle = 0;
+            closeAllServos();
             break;
           case 'waterOn':
-            isWateringActive = true;
+            if (!isWateringActive) toggleWatering();
             break;
           case 'phytoOn':
-            isPhytoLightActive = true;
+            if (!isPhytoLightActive) togglePhytoLight();
             break;
           case 'whiteOn':
-            isWhiteLightActive = true;
+            if (!isWhiteLightActive) toggleWhiteLight();
             break;
         }
       }
@@ -647,6 +731,10 @@ class GreenhouseMqttService extends ChangeNotifier {
 
   void setTimeOfDay(double hours) {
     timeOfDayHours = hours.clamp(0.0, 24.0);
+    final int h = timeOfDayHours.floor();
+    final int m = ((timeOfDayHours - h) * 60).round();
+    rtcTimeString = '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+
     if (timeOfDayHours >= 6.0 && timeOfDayHours <= 20.0) {
       final norm = (timeOfDayHours - 6.0) / 14.0;
       final sunCurve = (1.0 - ((norm - 0.5).abs() * 2.0)).clamp(0.0, 1.0);
@@ -673,12 +761,18 @@ class GreenhouseMqttService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ==================== MQTT ПОДКЛЮЧЕНИЕ ====================
   Future<void> connect() async {
     saveToCache();
     if (kIsWeb) {
-      addLog('Web-режим: подключено к брокеру $broker');
+      addLog('Web-режим: эмуляция брокера $broker');
       isConnected = true;
       notifyListeners();
+      return;
+    }
+
+    if (_client != null && isConnected) {
+      requestFullStatus();
       return;
     }
 
@@ -692,11 +786,24 @@ class GreenhouseMqttService extends ChangeNotifier {
     _client!.onConnected = () {
       isConnected = true;
       addLog('MQTT подключен к HiveMQ');
+      _subscribeToTopics();
+      requestFullStatus();
+      notifyListeners();
+    };
+
+    _client!.onAutoReconnected = () {
+      isConnected = true;
+      _subscribeToTopics();
+      requestFullStatus();
       notifyListeners();
     };
 
     _client!.onDisconnected = () {
       isConnected = false;
+      isPendingWatering = false;
+      isPendingPhyto = false;
+      isPendingWhite = false;
+      isPendingMode = false;
       addLog('MQTT отключен');
       notifyListeners();
     };
@@ -716,12 +823,157 @@ class GreenhouseMqttService extends ChangeNotifier {
     }
   }
 
-  void _publish(String topic, String message) {
+  void requestFullStatus() {
+    _publish('greenhouse/status/get', '1', retain: false);
+  }
+
+  void _subscribeToTopics() {
+    if (_client == null) return;
+
+    _client!.subscribe('greenhouse/telemetry/#', MqttQos.atLeastOnce);
+    _client!.subscribe('greenhouse/state/#', MqttQos.atLeastOnce);
+
+    _updatesSubscription?.cancel();
+    _updatesSubscription = _client!.updates!.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
+      if (c == null || c.isEmpty) return;
+      for (final msg in c) {
+        final recMsg = msg.payload as MqttPublishMessage?;
+        if (recMsg == null) continue;
+
+        final payload = MqttPublishPayload.bytesToStringAsString(recMsg.payload.message).trim();
+        final topic = msg.topic;
+
+        _handleIncomingMessage(topic, payload);
+      }
+    });
+  }
+
+  void _handleIncomingMessage(String topic, String payload) {
+    try {
+      if (topic == 'greenhouse/telemetry/all' || payload.startsWith('{')) {
+        final Map<String, dynamic> data = jsonDecode(payload);
+        if (data.containsKey('airTemp')) airTemp = (data['airTemp'] as num).toDouble();
+        if (data.containsKey('outdoorTemp')) outdoorTemp = (data['outdoorTemp'] as num).toDouble();
+        if (data.containsKey('airHumidity')) airHumidity = (data['airHumidity'] as num).toDouble();
+        if (data.containsKey('soilMoisture')) soilMoisture = (data['soilMoisture'] as num).toDouble();
+        if (data.containsKey('lightLux')) lightLux = (data['lightLux'] as num).toInt();
+        if (data.containsKey('co2')) co2Level = (data['co2'] as num).toInt();
+        if (data.containsKey('voltage')) voltage = (data['voltage'] as num).toDouble();
+        if (data.containsKey('time')) _parseIncomingTime(data['time'].toString());
+
+        if (data.containsKey('pump')) {
+          isWateringActive = data['pump'] == 1 || data['pump'] == true;
+          isPendingWatering = false;
+        }
+        if (data.containsKey('phyto')) {
+          isPhytoLightActive = data['phyto'] == 1 || data['phyto'] == true;
+          isPendingPhyto = false;
+        }
+        if (data.containsKey('white')) {
+          isWhiteLightActive = data['white'] == 1 || data['white'] == true;
+          isPendingWhite = false;
+        }
+        if (data.containsKey('mode')) {
+          isAutoModeActive = data['mode'] == 'auto' || data['mode'] == 1;
+          isPendingMode = false;
+        }
+        saveToCache();
+        notifyListeners();
+        return;
+      }
+
+      if (topic.endsWith('/time')) {
+        _parseIncomingTime(payload);
+        notifyListeners();
+        return;
+      }
+
+      if (topic == 'greenhouse/state/pump') {
+        isWateringActive = (payload == '1' || payload.toLowerCase() == 'true' || payload.toLowerCase() == 'on');
+        isPendingWatering = false;
+        addLog('Контроллер подтвердил: Насос ${isWateringActive ? "ВКЛ" : "ВЫКЛ"}');
+        saveToCache();
+        notifyListeners();
+        return;
+      }
+      if (topic == 'greenhouse/state/phyto') {
+        isPhytoLightActive = (payload == '1' || payload.toLowerCase() == 'true' || payload.toLowerCase() == 'on');
+        isPendingPhyto = false;
+        addLog('Контроллер подтвердил: Фито-свет ${isPhytoLightActive ? "ВКЛ" : "ВЫКЛ"}');
+        saveToCache();
+        notifyListeners();
+        return;
+      }
+      if (topic == 'greenhouse/state/white') {
+        isWhiteLightActive = (payload == '1' || payload.toLowerCase() == 'true' || payload.toLowerCase() == 'on');
+        isPendingWhite = false;
+        addLog('Контроллер подтвердил: Белый свет ${isWhiteLightActive ? "ВКЛ" : "ВЫКЛ"}');
+        saveToCache();
+        notifyListeners();
+        return;
+      }
+      if (topic == 'greenhouse/state/mode') {
+        isAutoModeActive = (payload.toLowerCase() == 'auto' || payload == '1');
+        isPendingMode = false;
+        addLog('Контроллер переключил режим: ${isAutoModeActive ? "АВТО" : "РУЧНОЙ"}');
+        saveToCache();
+        notifyListeners();
+        return;
+      }
+
+      final val = double.tryParse(payload);
+      if (val == null) return;
+
+      if (topic.endsWith('air_temp')) {
+        airTemp = val;
+      } else if (topic.endsWith('outdoor_temp')) {
+        outdoorTemp = val;
+      } else if (topic.endsWith('air_humidity') || topic.endsWith('humidity')) {
+        airHumidity = val;
+      } else if (topic.endsWith('soil_moisture') || topic.endsWith('soil')) {
+        soilMoisture = val;
+      } else if (topic.endsWith('light_lux') || topic.endsWith('lux')) {
+        lightLux = val.toInt();
+      } else if (topic.endsWith('co2')) {
+        co2Level = val.toInt();
+      } else if (topic.endsWith('voltage') || topic.endsWith('vcc')) {
+        voltage = val;
+      } else if (topic.endsWith('servo/roof_left')) {
+        roofLeftAngle = val.clamp(0.0, maxRoofAngleLimit);
+      } else if (topic.endsWith('servo/roof_right')) {
+        roofRightAngle = val.clamp(0.0, maxRoofAngleLimit);
+      } else if (topic.endsWith('servo/door_front')) {
+        doorFrontAngle = val.clamp(0.0, maxDoorAngleLimit);
+      } else if (topic.endsWith('servo/door_back')) {
+        doorBackAngle = val.clamp(0.0, maxDoorAngleLimit);
+      }
+
+      saveToCache();
+      notifyListeners();
+    } catch (e) {
+      addLog('Ошибка разбора пакета ($topic): $e');
+    }
+  }
+
+  void _parseIncomingTime(String timeStr) {
+    rtcTimeString = timeStr;
+    if (timeStr.contains(':')) {
+      final parts = timeStr.split(':');
+      final h = double.tryParse(parts[0]) ?? 12.0;
+      final m = double.tryParse(parts[1]) ?? 0.0;
+      timeOfDayHours = (h + (m / 60.0)).clamp(0.0, 24.0);
+    } else {
+      final dec = double.tryParse(timeStr);
+      if (dec != null) timeOfDayHours = dec.clamp(0.0, 24.0);
+    }
+  }
+
+  void _publish(String topic, String message, {bool retain = true}) {
     if (_client != null && isConnected && !kIsWeb) {
       final builder = MqttClientPayloadBuilder();
       builder.addString(message);
       _client!.publishMessage(
-          topic, MqttQos.atLeastOnce, builder.payload!, retain: true);
+          topic, MqttQos.atLeastOnce, builder.payload!, retain: retain);
     }
   }
 }
