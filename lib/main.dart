@@ -1,9 +1,8 @@
-import 'dart:math' as math;
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'mqtt_service.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const GreenhouseApp());
 }
 
@@ -13,625 +12,131 @@ class GreenhouseApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ГринХаус Про',
+      title: 'Smart Greenhouse Pro',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF090E14),
-        fontFamily: 'SF Pro Display',
-        useMaterial3: true,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF0E1217),
+        cardColor: const Color(0xFF171D26),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF00E676),
+          secondary: Color(0xFF29B6F6),
+          surface: Color(0xFF171D26),
+        ),
       ),
-      home: const InteractiveGreenhouseScreen(),
+      home: const GreenhouseDashboard(),
     );
   }
 }
 
-class InteractiveGreenhouseScreen extends StatefulWidget {
-  const InteractiveGreenhouseScreen({super.key});
+class GreenhouseDashboard extends StatefulWidget {
+  const GreenhouseDashboard({super.key});
 
   @override
-  State<InteractiveGreenhouseScreen> createState() =>
-      _InteractiveGreenhouseScreenState();
+  State<GreenhouseDashboard> createState() => _GreenhouseDashboardState();
 }
 
-class _InteractiveGreenhouseScreenState
-    extends State<InteractiveGreenhouseScreen> {
-  final GreenhouseMqttService mqtt = GreenhouseMqttService();
-  int currentTabIndex = 0;
+class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
+  final GreenhouseMqttService _mqtt = GreenhouseMqttService();
+  int _selectedTab = 0;
 
   @override
-  void initState() {
-    super.initState();
-    mqtt.addListener(() {
-      if (mounted) setState(() {});
-    });
-  }
-
-  List<Color> _getSkyGradient(double hour) {
-    if (hour >= 5.5 && hour < 8.5) {
-      return const [Color(0xFF2B1E38), Color(0xFF4A2934), Color(0xFF0B141C)];
-    } else if (hour >= 8.5 && hour < 17.5) {
-      return const [Color(0xFF153142), Color(0xFF0E202B), Color(0xFF081016)];
-    } else if (hour >= 17.5 && hour <= 20.5) {
-      return const [Color(0xFF3A1C2E), Color(0xFF542822), Color(0xFF091118)];
-    } else {
-      return const [Color(0xFF070C12), Color(0xFF05080C), Color(0xFF030507)];
-    }
-  }
-
-  String _formatTime(double hours) {
-    final int h = hours.floor() % 24;
-    final int m = ((hours - hours.floor()) * 60).round() % 60;
-    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-  }
-
-  String _getSunPhaseLabel(double hours) {
-    if (hours >= 5.5 && hours < 8.5) return '🌅 Рассвет';
-    if (hours >= 8.5 && hours < 17.5) return '☀️ День';
-    if (hours >= 17.5 && hours <= 20.5) return '🌇 Закат';
-    return '🌙 Ночь';
+  void dispose() {
+    _mqtt.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      _buildHomeTab(),
-      _buildScenariosTab(),
-      _buildHistoryTab(),
-      _buildSettingsTab(),
-    ];
-
-    return Scaffold(
-      body: AnimatedContainer(
-        duration: const Duration(milliseconds: 400),
-        width: double.infinity,
-        height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: RadialGradient(
-            center: const Alignment(0.0, -0.35),
-            radius: 1.2,
-            colors: _getSkyGradient(mqtt.timeOfDayHours),
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 430),
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
-                    child: _buildHeader(),
-                  ),
-                  Expanded(
-                    child: pages[currentTabIndex],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-      bottomNavigationBar: _buildGlassNavigationBar(),
-    );
-  }
-
-  // ==================== ВЕРХНЯЯ ПАНЕЛЬ ====================
-  Widget _buildHeader() {
-    final statusColor =
-        mqtt.isConnected ? const Color(0xFF28E070) : const Color(0xFF00E5FF);
-    final bool anyLightOn =
-        mqtt.isPhytoLightActive || mqtt.isWhiteLightActive;
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        IconButton(
-          icon: Icon(
-            anyLightOn ? Icons.lightbulb : Icons.lightbulb_outline,
-            color: anyLightOn ? const Color(0xFFFFEE58) : Colors.white38,
-            size: 24,
-          ),
-          tooltip: 'Мастер-свет: ВКЛ/ВЫКЛ обе ленты',
-          onPressed: mqtt.toggleAllLights,
-        ),
-        Column(
-          children: [
-            const Text(
-              'МОЯ ТЕПЛИЦА',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                fontSize: 19,
-                letterSpacing: 1.3,
-                shadows: [Shadow(color: Color(0x804CA6A8), blurRadius: 12)],
-              ),
-            ),
-            const SizedBox(height: 2),
-            Row(
-              mainAxisSize: MainAxisSize.min,
+    return ListenableBuilder(
+      listenable: _mqtt,
+      builder: (context, _) {
+        return Scaffold(
+          body: SafeArea(
+            child: Column(
               children: [
-                Icon(Icons.circle, size: 8, color: statusColor),
-                const SizedBox(width: 5),
-                Text(
-                  '${_getSunPhaseLabel(mqtt.timeOfDayHours)} (${_formatTime(mqtt.timeOfDayHours)}) • Улица ${mqtt.outdoorTemp.toStringAsFixed(1)}°C',
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-        IconButton(
-          icon: Icon(
-            mqtt.isDeveloperUnlocked ? Icons.developer_mode : Icons.tune,
-            color: mqtt.isDeveloperUnlocked
-                ? const Color(0xFFFFB300)
-                : Colors.white70,
-            size: 22,
-          ),
-          tooltip: 'Настройки',
-          onPressed: () => setState(() => currentTabIndex = 3),
-        ),
-      ],
-    );
-  }
-
-  // ==================== ВКЛАДКА 1: ГЛАВНАЯ ====================
-  Widget _buildHomeTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      child: Column(
-        children: [
-          // 3D-сцена теплицы (без желтого штыря сбоку, с нижним прикорневым поливом)
-          SizedBox(
-            height: 355,
-            width: 395,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: InteractiveGreenhouse3DPainter(
-                      roofLeftAngle: mqtt.roofLeftAngle,
-                      roofRightAngle: mqtt.roofRightAngle,
-                      doorFrontAngle: mqtt.doorFrontAngle,
-                      doorBackAngle: mqtt.doorBackAngle,
-                      isWatering: mqtt.isWateringActive,
-                      isPhytoLight: mqtt.isPhytoLightActive,
-                      isWhiteLight: mqtt.isWhiteLightActive,
-                      timeOfDay: mqtt.timeOfDayHours,
-                    ),
-                  ),
-                ),
-
-                // Выноска 1 (Слева сверху): Форточки и двери
-                Positioned(
-                  top: 6,
-                  left: 4,
-                  child: _buildBadge(
-                    iconColor: const Color(0xFF00E5FF),
-                    title:
-                        'Окна: ${mqtt.roofLeftAngle.toInt()}°/${mqtt.roofRightAngle.toInt()}° | Двери: ${mqtt.doorFrontAngle.toInt()}°/${mqtt.doorBackAngle.toInt()}°',
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildLiquidGlassMiniButton(
-                            'Откр все', mqtt.openAllServos),
-                        const SizedBox(width: 5),
-                        _buildLiquidGlassMiniButton(
-                            'Закр все', mqtt.closeAllServos),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Выноска 2 (Справа сверху): DS18B20 + Свет (клик открывает порог)
-                Positioned(
-                  top: 64,
-                  right: 4,
-                  child: GestureDetector(
-                    onTap: () => _showSensorThresholdDialog('outdoorTemp'),
-                    child: _buildBadge(
-                      iconColor: const Color(0xFF40C4FF),
-                      textColor: mqtt.getSensorValueColor('outdoorTemp'),
-                      title:
-                          'DS18B20: ${mqtt.outdoorTemp.toStringAsFixed(1)}°C | ☀️ ${mqtt.lightLux} лк',
-                      icon: Icons.ac_unit,
-                    ),
-                  ),
-                ),
-
-                // Выноска 3 (Справа по центру): DHT22
-                Positioned(
-                  top: 114,
-                  right: 4,
-                  child: GestureDetector(
-                    onTap: () => _showSensorThresholdDialog('airTemp'),
-                    child: _buildBadge(
-                      iconColor: const Color(0xFF28E070),
-                      textColor: mqtt.getSensorValueColor('airTemp'),
-                      title:
-                          'DHT22: ${mqtt.airTemp.toStringAsFixed(1)}°C | 💧 ${mqtt.airHumidity.toInt()}%',
-                      icon: Icons.thermostat,
-                    ),
-                  ),
-                ),
-
-                // Выноска 4 (Слева снизу): MQ135 (значок всегда голубой, меняется только текст!)
-                Positioned(
-                  bottom: 10,
-                  left: 4,
-                  child: GestureDetector(
-                    onTap: () => _showSensorThresholdDialog('co2'),
-                    child: _buildBadge(
-                      iconColor: const Color(0xFF00E5FF),
-                      textColor: mqtt.getSensorValueColor('co2'),
-                      title: 'MQ135: ${mqtt.co2Level} ppm',
-                      icon: Icons.cloud_outlined,
-                    ),
-                  ),
-                ),
-
-                // Выноска 5 (Справа снизу): Почва
-                Positioned(
-                  bottom: 10,
-                  right: 4,
-                  child: GestureDetector(
-                    onTap: () => _showSensorThresholdDialog('soilMoisture'),
-                    child: _buildBadge(
-                      iconColor: const Color(0xFF69F0AE),
-                      textColor: mqtt.getSensorValueColor('soilMoisture'),
-                      title:
-                          'Почва: ${mqtt.soilMoisture.toInt()}% ${mqtt.isWateringActive ? "• Полив💧" : ""}',
-                      icon: Icons.water_drop_outlined,
-                    ),
+                _buildTopStatusHeader(context),
+                Expanded(
+                  child: IndexedStack(
+                    index: _selectedTab,
+                    children: [
+                      _buildControlTab(),
+                      _buildScenariosTab(),
+                      _buildSettingsAndLogsTab(),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-
-          const SizedBox(height: 6),
-
-          // ИНТЕРАКТИВНАЯ ПАНЕЛЬ ДАТЧИКОВ: клик по любому датчику открывает настройку порога и гистерезиса!
-          _buildQuickSensorsStrip(),
-          const SizedBox(height: 10),
-
-          // Блок включения светодиодных лент и полива (С УДЕРЖАНИЕМ 2.5 СЕК)
-          _buildLightingAndPumpCard(),
-          const SizedBox(height: 10),
-
-          // Карточка управления 4 сервоприводами
-          _buildServoControlCard(),
-          const SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-
-  // Панель датчиков: иконки НЕ меняют цвет, а текст и цифры меняют (Белый -> Желтый -> Темно-оранжевый -> Красный)
-  Widget _buildQuickSensorsStrip() {
-    return _buildLiquidGlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildMiniSensorChip(
-                sensorKey: 'airTemp',
-                icon: Icons.thermostat,
-                fixedIconColor: const Color(0xFF28E070),
-                label: 'Внутри',
-                val: '${mqtt.airTemp.toStringAsFixed(1)}°C',
+          bottomNavigationBar: NavigationBar(
+            backgroundColor: const Color(0xFF131820),
+            indicatorColor: const Color(0xFF00E676).withOpacity(0.18),
+            selectedIndex: _selectedTab,
+            onDestinationSelected: (idx) => setState(() => _selectedTab = idx),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.dashboard_outlined),
+                selectedIcon: Icon(Icons.dashboard, color: Color(0xFF00E676)),
+                label: 'Управление',
               ),
-              _buildMiniSensorChip(
-                sensorKey: 'outdoorTemp',
-                icon: Icons.ac_unit,
-                fixedIconColor: const Color(0xFF40C4FF),
-                label: 'DS18B20',
-                val: '${mqtt.outdoorTemp.toStringAsFixed(1)}°C',
+              NavigationDestination(
+                icon: Icon(Icons.auto_fix_high_outlined),
+                selectedIcon: Icon(Icons.auto_fix_high, color: Color(0xFF00E676)),
+                label: 'Сценарии',
               ),
-              _buildMiniSensorChip(
-                sensorKey: 'lightLux',
-                icon: Icons.wb_sunny_outlined,
-                fixedIconColor: const Color(0xFFFFD54F),
-                label: 'Свет (ФР)',
-                val: '${mqtt.lightLux} лк',
-              ),
-              _buildMiniSensorChip(
-                sensorKey: 'co2',
-                icon: Icons.cloud_outlined,
-                fixedIconColor: const Color(0xFF00E5FF), // Иконка всегда голубая!
-                label: 'MQ135',
-                val: '${mqtt.co2Level} ppm',
-              ),
-              _buildMiniSensorChip(
-                sensorKey: 'soilMoisture',
-                icon: Icons.water_drop_outlined,
-                fixedIconColor: const Color(0xFF69F0AE),
-                label: 'Почва',
-                val: '${mqtt.soilMoisture.toInt()}%',
+              NavigationDestination(
+                icon: Icon(Icons.tune_outlined),
+                selectedIcon: Icon(Icons.tune, color: Color(0xFF00E676)),
+                label: 'Система',
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          const Text(
-            'Нажмите на любой датчик для настройки порога тревоги и гистерезиса (%)',
-            style: TextStyle(fontSize: 9.5, color: Colors.white38),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMiniSensorChip({
-    required String sensorKey,
-    required IconData icon,
-    required Color fixedIconColor,
-    required String label,
-    required String val,
-  }) {
-    final Color valueColor = mqtt.getSensorValueColor(sensorKey);
-    final Color labelColor = mqtt.getSensorLabelColor(sensorKey);
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: () => _showSensorThresholdDialog(sensorKey),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Иконка ВСЕГДА сохраняет свой цвет fixedIconColor
-            Icon(icon, size: 17, color: fixedIconColor),
-            const SizedBox(height: 4),
-            // Цифра значения меняет цвет (Белый / Желтый / Темно-оранжевый / Красный)
-            Text(
-              val,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                color: valueColor,
-              ),
-            ),
-            // Подпись (например, MQ135) тоже меняет цвет синхронно со значением
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight:
-                    valueColor == Colors.white ? FontWeight.normal : FontWeight.w700,
-                color: labelColor,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Диалоговое окно настройки порога и гистерезиса (%) при клике на датчик
-  void _showSensorThresholdDialog(String sensorKey) {
-    final cfg = mqtt.sensorConfigs[sensorKey];
-    if (cfg == null) return;
-
-    double tempThreshold = cfg.threshold;
-    double tempHyst = cfg.hysteresisPercent;
-    bool tempAlertHigh = cfg.alertWhenHigh;
-    final threshCtrl =
-        TextEditingController(text: tempThreshold.toInt().toString());
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final double span =
-                tempThreshold.abs() * (tempHyst / 100.0);
-            final double yellowPoint = tempAlertHigh
-                ? (tempThreshold - span)
-                : (tempThreshold + span);
-            final double orangePoint = tempAlertHigh
-                ? (tempThreshold - span * 0.5)
-                : (tempThreshold + span * 0.5);
-
-            return AlertDialog(
-              backgroundColor: const Color(0xFF0E1822),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-                side: const BorderSide(color: Color(0xFF00E5FF), width: 1.2),
-              ),
-              title: Text(
-                'Порог датчика: ${cfg.name}',
-                style:
-                    const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold),
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Выбор: сработка при превышении или падении
-                    DropdownButtonFormField<bool>(
-                      initialValue: tempAlertHigh,
-                      dropdownColor: const Color(0xFF0E1822),
-                      decoration: const InputDecoration(
-                        labelText: 'Тип контроля предела',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: true,
-                          child: Text('Верхний предел (опасно когда > порога)'),
-                        ),
-                        DropdownMenuItem(
-                          value: false,
-                          child: Text('Нижний предел (опасно когда < порога)'),
-                        ),
-                      ],
-                      onChanged: (v) =>
-                          setDialogState(() => tempAlertHigh = v!),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Ввод и ползунок самого порога
-                    TextField(
-                      controller: threshCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: 'Порог сработки (${cfg.unit})',
-                        border: const OutlineInputBorder(),
-                      ),
-                      onChanged: (v) {
-                        final parsed = double.tryParse(v);
-                        if (parsed != null) {
-                          setDialogState(() {
-                            tempThreshold =
-                                parsed.clamp(cfg.minLimit, cfg.maxLimit);
-                          });
-                        }
-                      },
-                    ),
-                    _buildNeonSlider(
-                      value: tempThreshold.clamp(cfg.minLimit, cfg.maxLimit),
-                      min: cfg.minLimit,
-                      max: cfg.maxLimit,
-                      activeColor: const Color(0xFFFF3D00),
-                      onChanged: (v) {
-                        setDialogState(() {
-                          tempThreshold = v;
-                          threshCtrl.text = v.toInt().toString();
-                        });
-                      },
-                      onChangeEnd: (_) {},
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Ползунок гистерезиса в процентах
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Гистерезис предтревоги:',
-                          style: TextStyle(fontSize: 12, color: Colors.white70),
-                        ),
-                        Text(
-                          '${tempHyst.toInt()}%',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFFFFD54F),
-                          ),
-                        ),
-                      ],
-                    ),
-                    _buildNeonSlider(
-                      value: tempHyst,
-                      min: 2.0,
-                      max: 35.0,
-                      activeColor: const Color(0xFFFFD54F),
-                      onChanged: (v) => setDialogState(() => tempHyst = v),
-                      onChangeEnd: (_) {},
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Наглядная подсказка, при каких значениях какого цвета будет текст
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.black26,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Цветовая индикация текста и значения:',
-                            style:
-                                TextStyle(fontSize: 11, color: Colors.white70),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '• Желтый: с ${yellowPoint.toStringAsFixed(0)}${cfg.unit}',
-                            style: const TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFFFFD54F),
-                                fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            '• Темно-оранжевый: с ${orangePoint.toStringAsFixed(0)}${cfg.unit}',
-                            style: const TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFFFF6D00),
-                                fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            '• Красный (предел): ${tempAlertHigh ? "≥" : "≤"} ${tempThreshold.toStringAsFixed(0)}${cfg.unit}',
-                            style: const TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFFFF3D00),
-                                fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Отмена'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    mqtt.updateSensorThreshold(
-                      sensorKey,
-                      threshold: tempThreshold,
-                      hysteresisPercent: tempHyst,
-                      alertWhenHigh: tempAlertHigh,
-                    );
-                    Navigator.pop(ctx);
-                  },
-                  child: const Text('Сохранить'),
-                ),
-              ],
-            );
-          },
         );
       },
     );
   }
 
-  // Карточка включения LED-лент и Насоса с удержанием 2.5 сек
-  Widget _buildLightingAndPumpCard() {
-    return _buildLiquidGlassCard(
+  // ==================== ВЕРХНЯЯ ПАНЕЛЬ СТАТУСА (ТЕЛЕФОН + ESP32) ====================
+  Widget _buildTopStatusHeader(BuildContext context) {
+    final phoneOk = _mqtt.isConnected;
+    final espOk = _mqtt.isConnected && _mqtt.isControllerOnline;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      decoration: const BoxDecoration(
+        color: Color(0xFF131820),
+        border: Border(bottom: BorderSide(color: Colors.white10)),
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Row(
             children: [
-              Text(
-                'СИЛОВЫЕ НАГРУЗКИ (MOSFET IRLZ44N)',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                  letterSpacing: 0.6,
-                ),
+              const Icon(Icons.eco, color: Color(0xFF00E676), size: 22),
+              const SizedBox(width: 8),
+              const Text(
+                'Умная Теплица',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
-              Text(
-                'Удерживайте 2.5 сек',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: Color(0xFFFFD54F),
-                  fontWeight: FontWeight.w600,
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.access_time, size: 14, color: Colors.white60),
+                    const SizedBox(width: 5),
+                    Text(
+                      _mqtt.rtcTimeString,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -639,136 +144,111 @@ class _InteractiveGreenhouseScreenState
           const SizedBox(height: 10),
           Row(
             children: [
+              // 1. Значок подключения ТЕЛЕФОНА к MQTT (нажатие открывает настройки MQTT)
               Expanded(
-                child: HoldToToggleGlassButton(
-                  label: 'Фито-лента',
-                  subtitle: mqtt.isPhytoLightActive ? 'Спектр ВКЛ' : 'ВЫКЛ',
-                  icon: Icons.wb_iridescent,
-                  isActive: mqtt.isPhytoLightActive,
-                  activeColor: const Color(0xFFFF40E5),
-                  onConfirmed: mqtt.togglePhytoLight,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: HoldToToggleGlassButton(
-                  label: 'Белый LED',
-                  subtitle: mqtt.isWhiteLightActive ? 'Дневной ВКЛ' : 'ВЫКЛ',
-                  icon: Icons.flourescent,
-                  isActive: mqtt.isWhiteLightActive,
-                  activeColor: const Color(0xFFFFEE58),
-                  onConfirmed: mqtt.toggleWhiteLight,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: HoldToToggleGlassButton(
-                  label: 'Полив снизу',
-                  subtitle: mqtt.isWateringActive ? 'Насос ВКЛ' : 'ВЫКЛ',
-                  icon: Icons.water_drop,
-                  isActive: mqtt.isWateringActive,
-                  activeColor: const Color(0xFF00E5FF),
-                  onConfirmed: mqtt.toggleWatering,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ==================== КАРТОЧКА 4 СЕРВОПРИВОДОВ ====================
-  Widget _buildServoControlCard() {
-    final bool anyOpen = mqtt.roofLeftAngle > 0 ||
-        mqtt.roofRightAngle > 0 ||
-        mqtt.doorFrontAngle > 0 ||
-        mqtt.doorBackAngle > 0;
-
-    return _buildLiquidGlassCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'УПРАВЛЕНИЕ 4 СЕРВОПРИВОДАМИ (SG90)',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
+                child: InkWell(
+                  onTap: () => _showMqttSettingsSheet(context),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: (phoneOk ? const Color(0xFF00E676) : Colors.redAccent)
+                          .withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: (phoneOk ? const Color(0xFF00E676) : Colors.redAccent)
+                            .withOpacity(0.45),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.smartphone,
+                          size: 18,
+                          color: phoneOk ? const Color(0xFF00E676) : Colors.redAccent,
+                        ),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Телефон → MQTT',
+                                style: TextStyle(fontSize: 10, color: Colors.white60),
+                              ),
+                              Text(
+                                phoneOk ? 'Подключен' : 'Нет связи (настроить)',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: phoneOk
+                                      ? const Color(0xFF00E676)
+                                      : Colors.redAccent,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  Text(
-                    'Лимиты: Окна до ${mqtt.maxRoofAngleLimit.toInt()}° | Двери до ${mqtt.maxDoorAngleLimit.toInt()}°',
-                    style: const TextStyle(
-                        fontSize: 10.5, color: Color(0xFF00E5FF)),
-                  ),
-                ],
-              ),
-              Transform.scale(
-                scale: 0.82,
-                child: Switch(
-                  value: anyOpen,
-                  activeThumbColor: Colors.white,
-                  activeTrackColor: const Color(0xFF28E070),
-                  onChanged: (val) =>
-                      val ? mqtt.openAllServos() : mqtt.closeAllServos(),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          _buildServoRow(
-            label: '1. Левое окно (дальнее):',
-            angle: mqtt.roofLeftAngle,
-            maxLimit: mqtt.maxRoofAngleLimit,
-            color: const Color(0xFF00E5FF),
-            onChanged: (v) => mqtt.setRoofLeftAngle(v),
-            onChangeEnd: (v) => mqtt.setRoofLeftAngle(v, log: true),
-          ),
-          _buildServoRow(
-            label: '2. Правое окно (ближе к фасаду):',
-            angle: mqtt.roofRightAngle,
-            maxLimit: mqtt.maxRoofAngleLimit,
-            color: const Color(0xFF40C4FF),
-            onChanged: (v) => mqtt.setRoofRightAngle(v),
-            onChangeEnd: (v) => mqtt.setRoofRightAngle(v, log: true),
-          ),
-          _buildServoRow(
-            label: '3. Передняя лицевая дверь:',
-            angle: mqtt.doorFrontAngle,
-            maxLimit: mqtt.maxDoorAngleLimit,
-            color: const Color(0xFF28E070),
-            onChanged: (v) => mqtt.setDoorFrontAngle(v),
-            onChangeEnd: (v) => mqtt.setDoorFrontAngle(v, log: true),
-          ),
-          _buildServoRow(
-            label: '4. Задняя торцевая дверь:',
-            angle: mqtt.doorBackAngle,
-            maxLimit: mqtt.maxDoorAngleLimit,
-            color: const Color(0xFF69F0AE),
-            onChanged: (v) => mqtt.setDoorBackAngle(v),
-            onChangeEnd: (v) => mqtt.setDoorBackAngle(v, log: true),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: _buildLiquidGlassActionButton(
-                  'ОТКРЫТЬ ВСЕ ДО ЛИМИТА',
-                  mqtt.openAllServos,
                 ),
               ),
               const SizedBox(width: 8),
+              // 2. Значок подключения КОНТРОЛЛЕРА ESP32-S3 к MQTT
               Expanded(
-                child: _buildLiquidGlassActionButton(
-                  'ЗАКРЫТЬ ВСЕ (0°)',
-                  mqtt.closeAllServos,
+                child: InkWell(
+                  onTap: () {
+                    if (phoneOk) _mqtt.requestFullStatus();
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: (espOk ? const Color(0xFF29B6F6) : Colors.orangeAccent)
+                          .withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: (espOk ? const Color(0xFF29B6F6) : Colors.orangeAccent)
+                            .withOpacity(0.45),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.memory,
+                          size: 18,
+                          color: espOk ? const Color(0xFF29B6F6) : Colors.orangeAccent,
+                        ),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'ESP32 → MQTT',
+                                style: TextStyle(fontSize: 10, color: Colors.white60),
+                              ),
+                              Text(
+                                espOk ? 'Контроллер в сети' : 'Контроллер оффлайн',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: espOk
+                                      ? const Color(0xFF29B6F6)
+                                      : Colors.orangeAccent,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -778,361 +258,697 @@ class _InteractiveGreenhouseScreenState
     );
   }
 
-  Widget _buildServoRow({
-    required String label,
-    required double angle,
-    required double maxLimit,
-    required Color color,
-    required ValueChanged<double> onChanged,
-    required ValueChanged<double> onChangeEnd,
-  }) {
-    return Column(
+  // ==================== ВКЛАДКА 1: УПРАВЛЕНИЕ И ДАТЧИКИ ====================
+  Widget _buildControlTab() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
       children: [
+        // Кнопка смены режима (удержание 1.5 сек + ожидание подтверждения ESP32)
+        HoldModeButton(mqtt: _mqtt),
+        const SizedBox(height: 16),
+
+        // Сетка датчиков
+        const Text(
+          'ПОКАЗАНИЯ ДАТЧИКОВ',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.white54,
+            letterSpacing: 1.0,
+          ),
+        ),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 1.75,
+          children: [
+            _buildSensorCard(
+              configKey: 'airTemp',
+              title: 'T внутри / Влажн.',
+              value: '${_mqtt.airTemp.toStringAsFixed(1)}°C / ${_mqtt.airHumidity.toInt()}%',
+              icon: Icons.thermostat,
+            ),
+            _buildSensorCard(
+              configKey: 'outdoorTemp',
+              title: 'T на улице',
+              value: '${_mqtt.outdoorTemp.toStringAsFixed(1)}°C',
+              icon: Icons.ac_unit,
+            ),
+            _buildSensorCard(
+              configKey: 'soilMoisture',
+              title: 'Влажность почвы',
+              value: '${_mqtt.soilMoisture.toInt()}%',
+              icon: Icons.water_drop,
+            ),
+            _buildSensorCard(
+              configKey: 'lightLux',
+              title: 'Освещённость',
+              value: '${_mqtt.lightLux} лк',
+              icon: Icons.wb_sunny,
+            ),
+            _buildSensorCard(
+              configKey: 'co2',
+              title: 'Газ / CO₂ (MQ135)',
+              value: '${_mqtt.co2Level} ppm',
+              icon: Icons.air,
+            ),
+            _buildStaticInfoCard(
+              title: 'Питание системы',
+              value: '${_mqtt.voltage.toStringAsFixed(1)} В',
+              icon: Icons.bolt,
+              accent: Colors.amberAccent,
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+
+        // Полив и освещение (кнопки меняют вид ТОЛЬКО после подтверждения контроллера)
+        const Text(
+          'ПОЛИВ И ОСВЕЩЕНИЕ',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.white54,
+            letterSpacing: 1.0,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _buildActuatorButton(
+                title: 'Полив',
+                isActive: _mqtt.isWateringActive,
+                isPending: _mqtt.isPendingWatering,
+                activeColor: const Color(0xFF29B6F6),
+                icon: Icons.water,
+                onTap: _mqtt.toggleWatering,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildActuatorButton(
+                title: 'Фито-LED',
+                isActive: _mqtt.isPhytoLightActive,
+                isPending: _mqtt.isPendingPhyto,
+                activeColor: const Color(0xFFE040FB),
+                icon: Icons.wb_incandescent,
+                onTap: _mqtt.togglePhytoLight,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildActuatorButton(
+                title: 'Белый LED',
+                isActive: _mqtt.isWhiteLightActive,
+                isPending: _mqtt.isPendingWhite,
+                activeColor: const Color(0xFFFFD54F),
+                icon: Icons.lightbulb,
+                onTap: _mqtt.toggleWhiteLight,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+
+        // Сервоприводы 0 - 180 градусов
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label,
-                style: const TextStyle(fontSize: 11.5, color: Colors.white70)),
-            Text(
-              '${angle.toInt()}° / макс ${maxLimit.toInt()}°',
+            const Text(
+              'ПРИВОДЫ ОКОН И ДВЕРЕЙ (0–180°)',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: color,
+                color: Colors.white54,
+                letterSpacing: 1.0,
               ),
+            ),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: _mqtt.openAllServos,
+                  child: const Text('Открыть все', style: TextStyle(fontSize: 12)),
+                ),
+                TextButton(
+                  onPressed: _mqtt.closeAllServos,
+                  child: const Text('Закрыть',
+                      style: TextStyle(fontSize: 12, color: Colors.orangeAccent)),
+                ),
+              ],
             ),
           ],
         ),
-        _buildNeonSlider(
-          value: angle.clamp(0.0, maxLimit),
-          max: maxLimit,
-          activeColor: color,
-          onChanged: onChanged,
-          onChangeEnd: onChangeEnd,
+        _buildServoCard(
+          label: 'Левое окно крыши',
+          angle: _mqtt.roofLeftAngle,
+          maxAngle: _mqtt.maxRoofAngleLimit,
+          onChanged: (v) => _mqtt.setRoofLeftAngle(v, log: false),
+          onChangeEnd: (v) => _mqtt.setRoofLeftAngle(v, log: true),
+        ),
+        _buildServoCard(
+          label: 'Правое окно крыши',
+          angle: _mqtt.roofRightAngle,
+          maxAngle: _mqtt.maxRoofAngleLimit,
+          onChanged: (v) => _mqtt.setRoofRightAngle(v, log: false),
+          onChangeEnd: (v) => _mqtt.setRoofRightAngle(v, log: true),
+        ),
+        _buildServoCard(
+          label: 'Передняя дверь',
+          angle: _mqtt.doorFrontAngle,
+          maxAngle: _mqtt.maxDoorAngleLimit,
+          onChanged: (v) => _mqtt.setDoorFrontAngle(v, log: false),
+          onChangeEnd: (v) => _mqtt.setDoorFrontAngle(v, log: true),
+        ),
+        _buildServoCard(
+          label: 'Задняя дверь',
+          angle: _mqtt.doorBackAngle,
+          maxAngle: _mqtt.maxDoorAngleLimit,
+          onChanged: (v) => _mqtt.setDoorBackAngle(v, log: false),
+          onChangeEnd: (v) => _mqtt.setDoorBackAngle(v, log: true),
         ),
       ],
     );
   }
 
-  Widget _buildNeonSlider({
-    required double value,
-    double min = 0.0,
-    double max = 90.0,
-    Color activeColor = const Color(0xFF00E5FF),
+  Widget _buildSensorCard({
+    required String configKey,
+    required String title,
+    required String value,
+    required IconData icon,
+  }) {
+    final valColor = _mqtt.getSensorValueColor(configKey);
+    final lblColor = _mqtt.getSensorLabelColor(configKey);
+
+    return InkWell(
+      onTap: () => _showThresholdSheet(configKey),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF171D26),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 16, color: valColor),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: lblColor),
+                  ),
+                ),
+                const Icon(Icons.tune, size: 13, color: Colors.white24),
+              ],
+            ),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                color: valColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStaticInfoCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color accent,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF171D26),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: Colors.white54),
+                ),
+              ),
+            ],
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+              color: accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActuatorButton({
+    required String title,
+    required bool isActive,
+    required bool isPending,
+    required Color activeColor,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: isPending ? null : onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isActive ? activeColor.withOpacity(0.22) : const Color(0xFF171D26),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isPending
+                ? Colors.amberAccent
+                : (isActive ? activeColor : Colors.white12),
+            width: 1.4,
+          ),
+        ),
+        child: Column(
+          children: [
+            if (isPending)
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2.2),
+              )
+            else
+              Icon(
+                icon,
+                size: 24,
+                color: isActive ? activeColor : Colors.white54,
+              ),
+            const SizedBox(height: 6),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: isActive ? Colors.white : Colors.white70,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              isPending ? 'Отклик...' : (isActive ? 'ВКЛ' : 'ВЫКЛ'),
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: isPending
+                    ? Colors.amberAccent
+                    : (isActive ? activeColor : Colors.white38),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildServoCard({
+    required String label,
+    required double angle,
+    required double maxAngle,
     required ValueChanged<double> onChanged,
     required ValueChanged<double> onChangeEnd,
   }) {
-    return SliderTheme(
-      data: SliderTheme.of(context).copyWith(
-        activeTrackColor: activeColor,
-        inactiveTrackColor: Colors.white.withValues(alpha: 0.12),
-        thumbColor: Colors.white,
-        overlayColor: activeColor.withValues(alpha: 0.2),
-        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.5),
-        trackHeight: 3.5,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF171D26),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white10),
       ),
-      child: Slider(
-        value: value.clamp(min, max),
-        min: min,
-        max: max,
-        onChanged: onChanged,
-        onChangeEnd: onChangeEnd,
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: const TextStyle(fontSize: 13)),
+              Text(
+                '${angle.toInt()}° / ${maxAngle.toInt()}°',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF00E676),
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            value: angle.clamp(0.0, maxAngle),
+            min: 0.0,
+            max: maxAngle,
+            divisions: maxAngle.toInt(),
+            activeColor: const Color(0xFF00E676),
+            onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
+          ),
+        ],
       ),
     );
   }
 
-  // ==================== ВКЛАДКА 2: СЦЕНАРИИ ====================
+  // ==================== ВКЛАДКА 2: ГИБКОЕ МЕНЮ СЦЕНАРИЕВ ====================
   Widget _buildScenariosTab() {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'АВТОСЦЕНАРИИ ESP32-S3',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white70),
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: const Color(0xFF00E676),
+        foregroundColor: Colors.black,
+        icon: const Icon(Icons.add),
+        label: const Text('Новый сценарий', style: TextStyle(fontWeight: FontWeight.bold)),
+        onPressed: () => _openRuleEditor(null),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+        children: [
+          const Text(
+            'АВТОМАТИЗАЦИЯ И СЦЕНАРИИ',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.white54,
+              letterSpacing: 1.0,
             ),
-            _buildLiquidGlassMiniButton(
-              '+ Добавить сценарий',
-              _showAddScenarioDialog,
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Настраивайте одиночные и составные условия (И / ИЛИ) с любыми углами 0–180°.',
+            style: TextStyle(fontSize: 12, color: Colors.white38),
+          ),
+          const SizedBox(height: 14),
+          if (_mqtt.rules.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 40),
+              child: Center(
+                child: Text(
+                  'Сценариев пока нет. Нажмите «Новый сценарий».',
+                  style: TextStyle(color: Colors.white54),
+                ),
+              ),
             ),
-          ],
+          ..._mqtt.rules.map((rule) => _buildScenarioCard(rule)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScenarioCard(AutomationRule rule) {
+    final cond1Text =
+        '${_sensorTitle(rule.sensorType)} ${rule.operatorType} ${_formatSensorValue(rule.sensorType, rule.threshold)}';
+    final cond2Text = rule.hasSecondCondition
+        ? ' ${rule.logicOperator == "OR" ? "ИЛИ" : "И"} ${_sensorTitle(rule.secondSensorType)} ${rule.secondOperatorType} ${_formatSensorValue(rule.secondSensorType, rule.secondThreshold)}'
+        : '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF171D26),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: rule.isEnabled
+              ? const Color(0xFF00E676).withOpacity(0.35)
+              : Colors.white10,
         ),
-        const SizedBox(height: 12),
-        ...mqtt.rules.map(
-          (rule) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _buildLiquidGlassCard(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _buildScenarioTile(
-                      title: rule.name,
-                      subtitle: rule.subtitle,
-                      value: rule.isEnabled,
-                      onChanged: (val) => mqtt.toggleRule(rule.id, val),
-                    ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  rule.name,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: rule.isEnabled ? Colors.white : Colors.white54,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline,
-                        color: Colors.white38, size: 19),
-                    tooltip: 'Удалить сценарий',
-                    onPressed: () => mqtt.deleteRule(rule.id),
-                  ),
-                ],
+                ),
+              ),
+              Switch(
+                value: rule.isEnabled,
+                activeColor: const Color(0xFF00E676),
+                onChanged: (v) => _mqtt.toggleRule(rule.id, v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Бейдж условия
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: Colors.blueAccent.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'ЕСЛИ: $cond1Text$cond2Text',
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF82B1FF),
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 6),
+          // Список действий сценария
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: rule.actions.map((act) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00E676).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'ТО: ${act.describe()}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF00E676),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const Divider(height: 18, color: Colors.white10),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: () => _mqtt.executeRuleActions(rule, manualTest: true),
+                icon: const Icon(Icons.play_arrow, size: 16),
+                label: const Text('Выполнить', style: TextStyle(fontSize: 12)),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Редактировать',
+                icon: const Icon(Icons.edit_outlined, size: 19, color: Colors.white70),
+                onPressed: () => _openRuleEditor(rule),
+              ),
+              IconButton(
+                tooltip: 'Удалить',
+                icon: const Icon(Icons.delete_outline, size: 19, color: Colors.redAccent),
+                onPressed: () => _mqtt.deleteRule(rule.id),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
-  void _showAddScenarioDialog() {
-    final nameCtrl = TextEditingController();
-    final thresholdCtrl = TextEditingController(text: '28');
-    String selectedSensor = 'airTemp';
-    bool isGreater = true;
-    String selectedAction = 'openVents';
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF101C26),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-                side: const BorderSide(color: Color(0xFF00E5FF), width: 1),
-              ),
-              title: const Text(
-                'Новый сценарий автоматики',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Название сценария',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedSensor,
-                      dropdownColor: const Color(0xFF101C26),
-                      decoration:
-                          const InputDecoration(labelText: 'Датчик условия'),
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'airTemp',
-                            child: Text('T внутри DHT22 (°C)')),
-                        DropdownMenuItem(
-                            value: 'outdoorTemp',
-                            child: Text('T улицы DS18B20 (°C)')),
-                        DropdownMenuItem(
-                            value: 'soilMoisture',
-                            child: Text('Влажность почвы (%)')),
-                        DropdownMenuItem(
-                            value: 'lightLux',
-                            child: Text('Освещенность ФР (Lux)')),
-                        DropdownMenuItem(
-                            value: 'co2',
-                            child: Text('Качество воздуха MQ135 (ppm)')),
-                      ],
-                      onChanged: (v) =>
-                          setDialogState(() => selectedSensor = v!),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<bool>(
-                            initialValue: isGreater,
-                            dropdownColor: const Color(0xFF101C26),
-                            decoration:
-                                const InputDecoration(labelText: 'Условие'),
-                            items: const [
-                              DropdownMenuItem(
-                                  value: true, child: Text('Больше (>)')),
-                              DropdownMenuItem(
-                                  value: false, child: Text('Меньше (<)')),
-                            ],
-                            onChanged: (v) =>
-                                setDialogState(() => isGreater = v!),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: TextField(
-                            controller: thresholdCtrl,
-                            keyboardType: TextInputType.number,
-                            decoration:
-                                const InputDecoration(labelText: 'Порог'),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedAction,
-                      dropdownColor: const Color(0xFF101C26),
-                      decoration: const InputDecoration(
-                          labelText: 'Выполнить действие'),
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'openVents',
-                            child: Text('Открыть окна до лимита')),
-                        DropdownMenuItem(
-                            value: 'closeVents',
-                            child: Text('Закрыть все окна и двери')),
-                        DropdownMenuItem(
-                            value: 'waterOn',
-                            child: Text('Включить полив')),
-                        DropdownMenuItem(
-                            value: 'phytoOn', child: Text('Включить Фито-LED')),
-                        DropdownMenuItem(
-                            value: 'whiteOn',
-                            child: Text('Включить Белый LED')),
-                      ],
-                      onChanged: (v) =>
-                          setDialogState(() => selectedAction = v!),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Отмена'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    final name = nameCtrl.text.trim().isEmpty
-                        ? 'Пользовательский сценарий'
-                        : nameCtrl.text.trim();
-                    final th = double.tryParse(thresholdCtrl.text) ?? 25.0;
-                    mqtt.addCustomRule(
-                      name: name,
-                      sensorType: selectedSensor,
-                      isGreater: isGreater,
-                      threshold: th,
-                      actionType: selectedAction,
-                    );
-                    Navigator.pop(ctx);
-                  },
-                  child: const Text('Создать'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // ==================== ВКЛАДКА 3: ИСТОРИЯ И ЖУРНАЛ ====================
-  Widget _buildHistoryTab() {
+  // ==================== ВКЛАДКА 3: НАСТРОЙКИ MQTT, АДМИНКА И ЛОГИ ====================
+  Widget _buildSettingsAndLogsTab() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _buildLiquidGlassCard(
+        // Карточка настроек MQTT (доступна всегда)
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF171D26),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white10),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'ТЕЛЕМЕТРИЯ ВСЕХ ДАТЧИКОВ КОНТРОЛЛЕРА',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF00E5FF)),
-              ),
-              const SizedBox(height: 12),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildMetricColumn(
-                    'Внутри (DHT22)',
-                    '${mqtt.airTemp.toStringAsFixed(1)}°C',
-                    mqtt.getSensorValueColor('airTemp'),
+                  const Icon(Icons.cloud_sync, color: Color(0xFF00E676)),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Подключение к MQTT Брокеру',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
                   ),
-                  _buildMetricColumn(
-                    'Улица (DS18B20)',
-                    '${mqtt.outdoorTemp.toStringAsFixed(1)}°C',
-                    mqtt.getSensorValueColor('outdoorTemp'),
-                  ),
-                  _buildMetricColumn(
-                    'Влажность',
-                    '${mqtt.airHumidity.toInt()}%',
-                    Colors.white,
-                  ),
-                  _buildMetricColumn(
-                    'Почва',
-                    '${mqtt.soilMoisture.toInt()}%',
-                    mqtt.getSensorValueColor('soilMoisture'),
+                  ElevatedButton(
+                    onPressed: () => _showMqttSettingsSheet(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00E676),
+                      foregroundColor: Colors.black,
+                    ),
+                    child: const Text('Изменить'),
                   ),
                 ],
               ),
               const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildMetricColumn(
-                    'Свет (ФР)',
-                    '${mqtt.lightLux} лк',
-                    mqtt.getSensorValueColor('lightLux'),
-                  ),
-                  _buildMetricColumn(
-                    'MQ135',
-                    '${mqtt.co2Level} ppm',
-                    mqtt.getSensorValueColor('co2'),
-                  ),
-                  _buildMetricColumn(
-                    'Питание',
-                    '${mqtt.voltage.toStringAsFixed(1)} В',
-                    Colors.white,
-                  ),
-                  _buildMetricColumn(
-                    'Время RTC',
-                    _formatTime(mqtt.timeOfDayHours),
-                    Colors.white,
-                  ),
-                ],
-              ),
+              Text('Сервер: ${_mqtt.broker}:${_mqtt.port}',
+                  style: const TextStyle(fontSize: 13, color: Colors.white70)),
+              Text('Логин: ${_mqtt.username}',
+                  style: const TextStyle(fontSize: 13, color: Colors.white70)),
+              if (_mqtt.lastConnectionError != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _mqtt.lastConnectionError!,
+                  style: const TextStyle(fontSize: 12, color: Colors.redAccent),
+                ),
+              ],
             ],
           ),
         ),
         const SizedBox(height: 16),
-        const Text(
-          'ЖУРНАЛ СОБЫТИЙ СИСТЕМЫ',
-          style: TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white70),
-        ),
-        const SizedBox(height: 10),
-        _buildLiquidGlassCard(
+
+        // Блок администратора (пароль полностью скрыт!)
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF171D26),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white10),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: mqtt.eventLogs
-                .map(
-                  (log) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    _mqtt.isDeveloperUnlocked ? Icons.lock_open : Icons.lock_outline,
+                    color: _mqtt.isDeveloperUnlocked
+                        ? const Color(0xFF00E676)
+                        : Colors.amberAccent,
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
                     child: Text(
-                      log,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Colors.white70,
-                        fontFamily: 'monospace',
-                      ),
+                      'Панель администратора',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                     ),
                   ),
-                )
+                  if (_mqtt.isDeveloperUnlocked)
+                    TextButton(
+                      onPressed: _mqtt.lockDeveloperMode,
+                      child: const Text('Заблокировать',
+                          style: TextStyle(color: Colors.redAccent)),
+                    )
+                  else
+                    ElevatedButton(
+                      onPressed: _showAdminPinDialog,
+                      child: const Text('Войти'),
+                    ),
+                ],
+              ),
+              if (_mqtt.isDeveloperUnlocked) ...[
+                const Divider(height: 22, color: Colors.white10),
+                Text(
+                  'Максимальный угол окон: ${_mqtt.maxRoofAngleLimit.toInt()}°',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                Slider(
+                  value: _mqtt.maxRoofAngleLimit,
+                  min: 10,
+                  max: 180,
+                  divisions: 170,
+                  onChanged: (v) =>
+                      _mqtt.setServoLimits(v, _mqtt.maxDoorAngleLimit),
+                ),
+                Text(
+                  'Максимальный угол дверей: ${_mqtt.maxDoorAngleLimit.toInt()}°',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                Slider(
+                  value: _mqtt.maxDoorAngleLimit,
+                  min: 10,
+                  max: 180,
+                  divisions: 170,
+                  onChanged: (v) =>
+                      _mqtt.setServoLimits(_mqtt.maxRoofAngleLimit, v),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Журнал событий
+        const Text(
+          'ЖУРНАЛ СОБЫТИЙ',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.white54,
+            letterSpacing: 1.0,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF171D26),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: _mqtt.eventLogs
+                .take(25)
+                .map((log) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Text(
+                        log,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ))
                 .toList(),
           ),
         ),
@@ -1140,813 +956,827 @@ class _InteractiveGreenhouseScreenState
     );
   }
 
-  Widget _buildMetricColumn(String label, String value, Color valueColor) {
-    return Column(
-      children: [
-        Text(value,
-            style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: valueColor)),
-        const SizedBox(height: 2),
-        Text(label,
-            style: TextStyle(
-                fontSize: 10,
-                color: valueColor == Colors.white ? Colors.white54 : valueColor)),
-      ],
+  // ==================== МОДАЛЬНОЕ ОКНО ВВОДА ДАННЫХ MQTT ====================
+  void _showMqttSettingsSheet(BuildContext context) {
+    final brokerCtrl = TextEditingController(text: _mqtt.broker);
+    final portCtrl = TextEditingController(text: _mqtt.port.toString());
+    final userCtrl = TextEditingController(text: _mqtt.username);
+    final passCtrl = TextEditingController(text: _mqtt.password);
+    bool obscurePass = true;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF171D26),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                20,
+                20,
+                MediaQuery.of(ctx).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Настройки подключения MQTT',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: brokerCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Адрес брокера (Host)',
+                        hintText: 'xxxxx.s1.eu.hivemq.cloud',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: portCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Порт (обычно 8883 для TLS)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: userCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Имя пользователя (Username)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: passCtrl,
+                      obscureText: obscurePass,
+                      decoration: InputDecoration(
+                        labelText: 'Пароль MQTT',
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: Icon(obscurePass
+                              ? Icons.visibility_off
+                              : Icons.visibility),
+                          onPressed: () =>
+                              setModalState(() => obscurePass = !obscurePass),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF00E676),
+                          foregroundColor: Colors.black,
+                        ),
+                        icon: const Icon(Icons.check),
+                        label: const Text(
+                          'Сохранить и подключиться',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        onPressed: () async {
+                          final parsedPort =
+                              int.tryParse(portCtrl.text.trim()) ?? 8883;
+                          Navigator.pop(ctx);
+                          await _mqtt.updateMqttCredentials(
+                            newBroker: brokerCtrl.text,
+                            newPort: parsedPort,
+                            newUsername: userCtrl.text,
+                            newPassword: passCtrl.text,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
-  // ==================== ВКЛАДКА 4: НАСТРОЙКИ (ПОРОГИ + ГИСТЕРЕЗИС БЕЗ ПАРОЛЯ) ====================
-  Widget _buildSettingsTab() {
-    final roofLimitCtrl =
-        TextEditingController(text: mqtt.maxRoofAngleLimit.toInt().toString());
-    final doorLimitCtrl =
-        TextEditingController(text: mqtt.maxDoorAngleLimit.toInt().toString());
+  // ==================== ДИАЛОГ ВВОДА ПАРОЛЯ АДМИНИСТРАТОРА (БЕЗ ПОДСКАЗОК) ====================
+  void _showAdminPinDialog() {
     final pinCtrl = TextEditingController();
-    final brokerCtrl = TextEditingController(text: mqtt.broker);
-    final userCtrl = TextEditingController(text: mqtt.username);
-    final passCtrl = TextEditingController(text: mqtt.password);
+    String? errorMsg;
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // 1. НАСТРОЙКА ПОРОГОВ СРАБОТКИ И ГИСТЕРЕЗИСА (%) ДЛЯ ВСЕХ ДАТЧИКОВ (В ОБЫЧНЫХ НАСТРОЙКАХ!)
-        _buildLiquidGlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'ПОРОГИ ТРЕВОГИ И ГИСТЕРЕЗИС ДАТЧИКОВ',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF00E5FF),
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Нажмите на датчик, чтобы задать порог и гистерезис (%). При подходе к порогу текст и цифра станут желтыми, затем темно-оранжевыми, а за пределом — красными.',
-                style: TextStyle(fontSize: 10.5, color: Colors.white54),
-              ),
-              const SizedBox(height: 10),
-              ...mqtt.sensorConfigs.entries.map((entry) {
-                final cfg = entry.value;
-                final valColor = mqtt.getSensorValueColor(cfg.key);
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => _showSensorThresholdDialog(cfg.key),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 9),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.12)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                cfg.name,
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: valColor,
-                                ),
-                              ),
-                              Text(
-                                'Порог: ${cfg.alertWhenHigh ? ">" : "<"} ${cfg.threshold.toInt()}${cfg.unit} • Гистерезис: ${cfg.hysteresisPercent.toInt()}%',
-                                style: const TextStyle(
-                                    fontSize: 11, color: Colors.white60),
-                              ),
-                            ],
-                          ),
-                          const Icon(Icons.edit_outlined,
-                              size: 18, color: Color(0xFF00E5FF)),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              }),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        // 2. ОГРАНИЧЕНИЯ УГЛОВ СЕРВОПРИВОДОВ
-        _buildLiquidGlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'МЕХАНИЧЕСКИЕ ОГРАНИЧЕНИЯ УГЛОВ (SG90)',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF00E5FF),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF171D26),
+              title: const Text('Доступ администратора'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: roofLimitCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Макс. угол ОКОН (10..90°)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: doorLimitCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Макс. угол ДВЕРЕЙ (10..90°)',
-                        border: OutlineInputBorder(),
-                      ),
+                  TextField(
+                    controller: pinCtrl,
+                    obscureText: true,
+                    obscuringCharacter: '•',
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: 'Пароль',
+                      errorText: errorMsg,
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: _buildLiquidGlassActionButton(
-                  'ПРИМЕНИТЬ ОГРАНИЧЕНИЯ УГЛОВ',
-                  () {
-                    final rMax = double.tryParse(roofLimitCtrl.text) ??
-                        mqtt.maxRoofAngleLimit;
-                    final dMax = double.tryParse(doorLimitCtrl.text) ??
-                        mqtt.maxDoorAngleLimit;
-                    mqtt.setServoLimits(rMax, dMax);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                            'Лимиты сохранены: Окна до ${mqtt.maxRoofAngleLimit.toInt()}°, Двери до ${mqtt.maxDoorAngleLimit.toInt()}°'),
-                      ),
-                    );
-                  },
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Отмена'),
                 ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF00E676),
+                    foregroundColor: Colors.black,
+                  ),
+                  onPressed: () {
+                    if (_mqtt.unlockDeveloperMode(pinCtrl.text)) {
+                      Navigator.pop(ctx);
+                    } else {
+                      setDialogState(() => errorMsg = 'Неверный пароль');
+                    }
+                  },
+                  child: const Text('Подтвердить'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
-        // 3. РЕЖИМ РАЗРАБОТЧИКА (ПАРОЛЬ 0000)
-        _buildLiquidGlassCard(
-          child: !mqtt.isDeveloperUnlocked
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.lock_outline,
-                            color: Color(0xFFFFB300), size: 18),
-                        SizedBox(width: 6),
-                        Text(
-                          'РЕЖИМ РАЗРАБОТЧИКА И СИМУЛЯЦИЯ (DEV)',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFFFFB300),
-                          ),
-                        ),
-                      ],
+  // ==================== НАСТРОЙКА ПОРОГА ДАТЧИКА ====================
+  void _showThresholdSheet(String key) {
+    final cfg = _mqtt.sensorConfigs[key];
+    if (cfg == null) return;
+
+    double tempThresh = cfg.threshold;
+    double tempHyst = cfg.hysteresisPercent;
+    bool tempHigh = cfg.alertWhenHigh;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF171D26),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Порог тревоги: ${cfg.name}',
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Значение порога: ${tempThresh.toInt()}${cfg.unit}'),
+                  Slider(
+                    value: tempThresh,
+                    min: cfg.minLimit,
+                    max: cfg.maxLimit,
+                    onChanged: (v) => setModalState(() => tempThresh = v),
+                  ),
+                  Text('Зона предупреждения (гистерезис): ${tempHyst.toInt()}%'),
+                  Slider(
+                    value: tempHyst,
+                    min: 2,
+                    max: 35,
+                    onChanged: (v) => setModalState(() => tempHyst = v),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(tempHigh
+                        ? 'Тревога при ПРЕВЫШЕНИИ (>)'
+                        : 'Тревога при ПАДЕНИИ (<)'),
+                    value: tempHigh,
+                    onChanged: (v) => setModalState(() => tempHigh = v),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00E676),
+                        foregroundColor: Colors.black,
+                      ),
+                      onPressed: () {
+                        _mqtt.updateSensorThreshold(
+                          key,
+                          threshold: tempThresh,
+                          hysteresisPercent: tempHyst,
+                          alertWhenHigh: tempHigh,
+                        );
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text('Сохранить порог'),
                     ),
-                    const SizedBox(height: 6),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ==================== ГИБКИЙ РЕДАКТОР СЦЕНАРИЕВ ====================
+  void _openRuleEditor(AutomationRule? existing) {
+    final nameCtrl = TextEditingController(
+      text: existing?.name ?? 'Новый сценарий',
+    );
+
+    String sensor1 = existing?.sensorType ?? 'airTemp';
+    String op1 = existing?.operatorType ?? '>';
+    double thresh1 = existing?.threshold ?? 26.0;
+
+    bool hasCond2 = existing?.hasSecondCondition ?? false;
+    String logicOp = existing?.logicOperator ?? 'AND';
+    String sensor2 = existing?.secondSensorType ?? 'lightLux';
+    String op2 = existing?.secondOperatorType ?? '>';
+    double thresh2 = existing?.secondThreshold ?? 300.0;
+
+    List<RuleAction> actions = existing != null
+        ? existing.actions
+            .map((a) => RuleAction(target: a.target, value: a.value))
+            .toList()
+        : [RuleAction(target: 'roofAngle', value: 120)];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF171D26),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return DraggableScrollableSheet(
+              initialChildSize: 0.88,
+              minChildSize: 0.5,
+              maxChildSize: 0.95,
+              expand: false,
+              builder: (_, scrollController) {
+                return ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    Text(
+                      existing == null
+                          ? 'Создание гибкого сценария'
+                          : 'Редактирование сценария',
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Название сценария',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+
+                    // Условие 1
                     const Text(
-                      'Введите пин-код (0000) для имитации показаний датчиков и проверки цветовой индикации порогов.',
-                      style: TextStyle(fontSize: 11, color: Colors.white54),
+                      '1. ОСНОВНОЕ УСЛОВИЕ (ЕСЛИ)',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF82B1FF)),
                     ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: pinCtrl,
-                            obscureText: true,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: 'Пин-код (0000)',
-                              border: OutlineInputBorder(),
-                            ),
+                    const SizedBox(height: 8),
+                    _buildConditionEditorBlock(
+                      sensor: sensor1,
+                      operatorType: op1,
+                      threshold: thresh1,
+                      onSensorChanged: (s) {
+                        setModalState(() {
+                          sensor1 = s;
+                          thresh1 = _defaultSensorThreshold(s);
+                        });
+                      },
+                      onOpChanged: (o) => setModalState(() => op1 = o),
+                      onThreshChanged: (v) => setModalState(() => thresh1 = v),
+                    ),
+
+                    // Второе условие (И / ИЛИ)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Добавить второе условие (И / ИЛИ)'),
+                      value: hasCond2,
+                      activeColor: const Color(0xFF00E676),
+                      onChanged: (v) => setModalState(() => hasCond2 = v),
+                    ),
+                    if (hasCond2) ...[
+                      Row(
+                        children: [
+                          ChoiceChip(
+                            label: const Text('И (оба верны)'),
+                            selected: logicOp == 'AND',
+                            onSelected: (_) => setModalState(() => logicOp = 'AND'),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        _buildLiquidGlassActionButton('РАЗБЛОКИРОВАТЬ', () {
-                          final ok = mqtt.unlockDeveloperMode(pinCtrl.text);
-                          if (!ok) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content:
-                                      Text('Неверный пин-код! Введите 0000')),
-                            );
-                          }
-                        }),
-                      ],
-                    ),
-                  ],
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                            label: const Text('ИЛИ (хотя бы одно)'),
+                            selected: logicOp == 'OR',
+                            onSelected: (_) => setModalState(() => logicOp = 'OR'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      _buildConditionEditorBlock(
+                        sensor: sensor2,
+                        operatorType: op2,
+                        threshold: thresh2,
+                        onSensorChanged: (s) {
+                          setModalState(() {
+                            sensor2 = s;
+                            thresh2 = _defaultSensorThreshold(s);
+                          });
+                        },
+                        onOpChanged: (o) => setModalState(() => op2 = o),
+                        onThreshChanged: (v) => setModalState(() => thresh2 = v),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Row(
+                        const Text(
+                          '2. ДЕЙСТВИЯ (ЧТО СДЕЛАТЬ)',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF00E676)),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            setModalState(() {
+                              actions.add(RuleAction(target: 'pump', value: 1));
+                            });
+                          },
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Добавить действие'),
+                        ),
+                      ],
+                    ),
+                    ...actions.asMap().entries.map((entry) {
+                      final i = entry.key;
+                      final act = entry.value;
+                      final isServo = act.target == 'roofAngle' ||
+                          act.target == 'doorAngle' ||
+                          act.target == 'allServos';
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0E1217),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Column(
                           children: [
-                            Icon(Icons.developer_board,
-                                color: Color(0xFF28E070), size: 18),
-                            SizedBox(width: 6),
-                            Text(
-                              'ИНЖЕНЕРНЫЙ СТЕНД СИМУЛЯЦИИ (DEV)',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF28E070),
-                              ),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: DropdownButton<String>(
+                                    value: act.target,
+                                    isExpanded: true,
+                                    dropdownColor: const Color(0xFF171D26),
+                                    items: const [
+                                      DropdownMenuItem(
+                                          value: 'roofAngle',
+                                          child: Text('Окна крыши (угол 0–180°)')),
+                                      DropdownMenuItem(
+                                          value: 'doorAngle',
+                                          child: Text('Двери теплицы (угол 0–180°)')),
+                                      DropdownMenuItem(
+                                          value: 'allServos',
+                                          child: Text('Все приводы (угол 0–180°)')),
+                                      DropdownMenuItem(
+                                          value: 'pump',
+                                          child: Text('Насос полива')),
+                                      DropdownMenuItem(
+                                          value: 'phytoLight',
+                                          child: Text('Фито-освещение')),
+                                      DropdownMenuItem(
+                                          value: 'whiteLight',
+                                          child: Text('Белое освещение')),
+                                    ],
+                                    onChanged: (val) {
+                                      if (val == null) return;
+                                      setModalState(() {
+                                        act.target = val;
+                                        act.value = (val == 'roofAngle' ||
+                                                val == 'doorAngle' ||
+                                                val == 'allServos')
+                                            ? 90.0
+                                            : 1.0;
+                                      });
+                                    },
+                                  ),
+                                ),
+                                if (actions.length > 1)
+                                  IconButton(
+                                    icon: const Icon(Icons.close,
+                                        color: Colors.redAccent, size: 20),
+                                    onPressed: () =>
+                                        setModalState(() => actions.removeAt(i)),
+                                  ),
+                              ],
                             ),
+                            if (isServo) ...[
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('Угол открытия:',
+                                      style: TextStyle(fontSize: 12)),
+                                  Text('${act.value.toInt()}°',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF00E676))),
+                                ],
+                              ),
+                              Slider(
+                                value: act.value.clamp(0.0, 180.0),
+                                min: 0,
+                                max: 180,
+                                divisions: 36,
+                                onChanged: (v) =>
+                                    setModalState(() => act.value = v),
+                              ),
+                            ] else ...[
+                              Row(
+                                children: [
+                                  ChoiceChip(
+                                    label: const Text('Включить (ВКЛ)'),
+                                    selected: act.value >= 1,
+                                    onSelected: (_) =>
+                                        setModalState(() => act.value = 1),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ChoiceChip(
+                                    label: const Text('Выключить (ВЫКЛ)'),
+                                    selected: act.value < 1,
+                                    onSelected: (_) =>
+                                        setModalState(() => act.value = 0),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
-                        _buildLiquidGlassMiniButton(
-                            'Выйти', mqtt.lockDeveloperMode),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      '☀️ Небесный цикл (DS3231): ${_formatTime(mqtt.timeOfDayHours)} (${_getSunPhaseLabel(mqtt.timeOfDayHours)})',
-                      style: const TextStyle(
-                          fontSize: 11.5, fontWeight: FontWeight.w600),
-                    ),
-                    _buildNeonSlider(
-                      value: mqtt.timeOfDayHours,
-                      max: 24.0,
-                      activeColor: const Color(0xFFFFD54F),
-                      onChanged: (v) => mqtt.setTimeOfDay(v),
-                      onChangeEnd: (_) => mqtt.saveToCache(),
-                    ),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        _buildLiquidGlassMiniButton(
-                            '🌅 Рассвет 07:00', () => mqtt.setTimeOfDay(7.0)),
-                        _buildLiquidGlassMiniButton(
-                            '☀️ Полдень 13:00', () => mqtt.setTimeOfDay(13.0)),
-                        _buildLiquidGlassMiniButton(
-                            '🌇 Закат 19:00', () => mqtt.setTimeOfDay(19.0)),
-                        _buildLiquidGlassMiniButton(
-                            '🌙 Ночь 23:00', () => mqtt.setTimeOfDay(23.0)),
-                      ],
-                    ),
-                    const Divider(height: 20, color: Colors.white12),
-                    Text(
-                        '🌡️ Температура внутри (DHT22): ${mqtt.airTemp.toStringAsFixed(1)}°C',
-                        style: TextStyle(
-                            fontSize: 11.5,
-                            color: mqtt.getSensorValueColor('airTemp'))),
-                    _buildNeonSlider(
-                      value: mqtt.airTemp,
-                      min: 5.0,
-                      max: 45.0,
-                      onChanged: (v) =>
-                          mqtt.updateSimulatedSensor(newAirTemp: v),
-                      onChangeEnd: (_) => mqtt.saveToCache(),
-                    ),
-                    Text(
-                        '❄️ Температура снаружи (DS18B20): ${mqtt.outdoorTemp.toStringAsFixed(1)}°C',
-                        style: TextStyle(
-                            fontSize: 11.5,
-                            color: mqtt.getSensorValueColor('outdoorTemp'))),
-                    _buildNeonSlider(
-                      value: mqtt.outdoorTemp,
-                      min: -15.0,
-                      max: 40.0,
-                      activeColor: const Color(0xFF40C4FF),
-                      onChanged: (v) =>
-                          mqtt.updateSimulatedSensor(newOutdoorTemp: v),
-                      onChangeEnd: (_) => mqtt.saveToCache(),
-                    ),
-                    Text(
-                        '💧 Влажность почвы: ${mqtt.soilMoisture.toInt()}%',
-                        style: TextStyle(
-                            fontSize: 11.5,
-                            color: mqtt.getSensorValueColor('soilMoisture'))),
-                    _buildNeonSlider(
-                      value: mqtt.soilMoisture,
-                      min: 0.0,
-                      max: 100.0,
-                      activeColor: const Color(0xFF28E070),
-                      onChanged: (v) => mqtt.updateSimulatedSensor(newSoil: v),
-                      onChangeEnd: (_) => mqtt.saveToCache(),
-                    ),
-                    Text(
-                        '💡 Уровень освещенности (ФР): ${mqtt.lightLux} Lux',
-                        style: TextStyle(
-                            fontSize: 11.5,
-                            color: mqtt.getSensorValueColor('lightLux'))),
-                    _buildNeonSlider(
-                      value: mqtt.lightLux.toDouble(),
-                      min: 0.0,
-                      max: 1000.0,
-                      activeColor: const Color(0xFFFF40E5),
-                      onChanged: (v) =>
-                          mqtt.updateSimulatedSensor(newLux: v.toInt()),
-                      onChangeEnd: (_) => mqtt.saveToCache(),
-                    ),
-                    Text(
-                        '🫧 Качество воздуха (MQ135): ${mqtt.co2Level} ppm',
-                        style: TextStyle(
-                            fontSize: 11.5,
-                            color: mqtt.getSensorValueColor('co2'))),
-                    _buildNeonSlider(
-                      value: mqtt.co2Level.toDouble(),
-                      min: 300.0,
-                      max: 2000.0,
-                      activeColor: const Color(0xFFFF7043),
-                      onChanged: (v) =>
-                          mqtt.updateSimulatedSensor(newCo2: v.toInt()),
-                      onChangeEnd: (_) => mqtt.saveToCache(),
+                      );
+                    }),
+
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF00E676),
+                          foregroundColor: Colors.black,
+                        ),
+                        onPressed: () {
+                          final rule = AutomationRule(
+                            id: existing?.id ??
+                                DateTime.now().millisecondsSinceEpoch.toString(),
+                            name: nameCtrl.text.trim().isEmpty
+                                ? 'Сценарий'
+                                : nameCtrl.text.trim(),
+                            sensorType: sensor1,
+                            operatorType: op1,
+                            threshold: thresh1,
+                            hasSecondCondition: hasCond2,
+                            logicOperator: logicOp,
+                            secondSensorType: sensor2,
+                            secondOperatorType: op2,
+                            secondThreshold: thresh2,
+                            actions: actions,
+                            isEnabled: existing?.isEnabled ?? true,
+                          );
+                          _mqtt.saveOrUpdateRule(rule);
+                          Navigator.pop(ctx);
+                        },
+                        child: const Text(
+                          'Сохранить сценарий',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
                     ),
                   ],
-                ),
-        ),
-        const SizedBox(height: 14),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
 
-        // 4. НАСТРОЙКИ БРОКЕРА MQTT
-        _buildLiquidGlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildConditionEditorBlock({
+    required String sensor,
+    required String operatorType,
+    required double threshold,
+    required ValueChanged<String> onSensorChanged,
+    required ValueChanged<String> onOpChanged,
+    required ValueChanged<double> onThreshChanged,
+  }) {
+    final range = _sensorRange(sensor);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E1217),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        children: [
+          Row(
             children: [
-              const Text(
-                'ПАРАМЕТРЫ БРОКЕРА HIVEMQ CLOUD',
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF00E5FF)),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: brokerCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Хост брокера (Cluster URL)',
-                  border: OutlineInputBorder(),
+              Expanded(
+                flex: 3,
+                child: DropdownButton<String>(
+                  value: sensor,
+                  isExpanded: true,
+                  dropdownColor: const Color(0xFF171D26),
+                  items: const [
+                    DropdownMenuItem(value: 'airTemp', child: Text('T внутри (°C)')),
+                    DropdownMenuItem(value: 'outdoorTemp', child: Text('T улицы (°C)')),
+                    DropdownMenuItem(value: 'airHumidity', child: Text('Влажность возд. (%)')),
+                    DropdownMenuItem(value: 'soilMoisture', child: Text('Влажность почвы (%)')),
+                    DropdownMenuItem(value: 'lightLux', child: Text('Освещённость (лк)')),
+                    DropdownMenuItem(value: 'co2', child: Text('Газ / CO₂ (ppm)')),
+                    DropdownMenuItem(value: 'voltage', child: Text('Питание (В)')),
+                    DropdownMenuItem(value: 'timeHour', child: Text('Время суток (ч)')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) onSensorChanged(v);
+                  },
                 ),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: userCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Логин (Username)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: passCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Пароль (Password)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: _buildLiquidGlassActionButton(
-                  'СОХРАНИТЬ И ПОДКЛЮЧИТЬСЯ К БРОКЕРУ',
-                  () {
-                    mqtt.broker = brokerCtrl.text.trim();
-                    mqtt.username = userCtrl.text.trim();
-                    mqtt.password = passCtrl.text.trim();
-                    mqtt.connect();
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 1,
+                child: DropdownButton<String>(
+                  value: operatorType,
+                  isExpanded: true,
+                  dropdownColor: const Color(0xFF171D26),
+                  items: const [
+                    DropdownMenuItem(value: '>', child: Text('>')),
+                    DropdownMenuItem(value: '<', child: Text('<')),
+                    DropdownMenuItem(value: '>=', child: Text('≥')),
+                    DropdownMenuItem(value: '<=', child: Text('≤')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) onOpChanged(v);
                   },
                 ),
               ),
             ],
           ),
-        ),
-      ],
-    );
-  }
-
-  // ==================== МЕТОДЫ ЖИДКОГО СТЕКЛА ====================
-  Widget _buildLiquidGlassCard({
-    required Widget child,
-    EdgeInsetsGeometry padding = const EdgeInsets.all(14),
-  }) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: const Color(0xFF00E5FF).withValues(alpha: 0.25),
-              width: 1.2,
-            ),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white.withValues(alpha: 0.14),
-                const Color(0xFF4CA6A8).withValues(alpha: 0.08),
-                Colors.black.withValues(alpha: 0.38),
-              ],
-            ),
-          ),
-          child: child,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLiquidGlassActionButton(String label, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: const Color(0xFF00E5FF).withValues(alpha: 0.45),
-                width: 1.2,
-              ),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.white.withValues(alpha: 0.28),
-                  const Color(0xFF00E5FF).withValues(alpha: 0.22),
-                  const Color(0xFF0C222C).withValues(alpha: 0.65),
-                ],
-              ),
-            ),
-            child: Center(
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLiquidGlassMiniButton(String label, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.white.withValues(alpha: 0.22),
-              const Color(0xFF00E5FF).withValues(alpha: 0.14),
-            ],
-          ),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 9.5,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Плашка на 3D-сцене: иконка ВСЕГДА цвета iconColor, а текст окрашивается в textColor
-  Widget _buildBadge({
-    required String title,
-    IconData? icon,
-    Widget? child,
-    Color iconColor = const Color(0xFF00E5FF),
-    Color textColor = Colors.white,
-  }) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(11),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          decoration: BoxDecoration(
-            color: const Color(0xCC0A131A),
-            borderRadius: BorderRadius.circular(11),
-            border: Border.all(
-                color: iconColor.withValues(alpha: 0.55), width: 1.1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (icon != null) ...[
-                    // Значок не меняет цвет при тревоге!
-                    Icon(icon, size: 13, color: iconColor),
-                    const SizedBox(width: 4),
-                  ],
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: textColor,
-                    ),
-                  ),
-                ],
-              ),
-              if (child != null) ...[
-                const SizedBox(height: 4),
-                child,
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildScenarioTile({
-    required String title,
-    required String subtitle,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+              const Text('Пороговое значение:', style: TextStyle(fontSize: 12)),
               Text(
-                title,
+                _formatSensorValue(sensor, threshold),
                 style: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
-              ),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: value ? const Color(0xFF28E070) : Colors.white38,
-                ),
+                    fontWeight: FontWeight.bold, color: Color(0xFF82B1FF)),
               ),
             ],
           ),
-        ),
-        Transform.scale(
-          scale: 0.82,
-          child: Switch(
-            value: value,
-            activeThumbColor: Colors.white,
-            activeTrackColor: const Color(0xFF28E070),
-            onChanged: onChanged,
+          Slider(
+            value: threshold.clamp(range.$1, range.$2),
+            min: range.$1,
+            max: range.$2,
+            onChanged: onThreshChanged,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildGlassNavigationBar() {
-    return ClipRRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          height: 66,
-          decoration: BoxDecoration(
-            color: const Color(0xCC080E14),
-            border: Border(
-              top: BorderSide(
-                color: Colors.white.withValues(alpha: 0.1),
-                width: 1,
-              ),
-            ),
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 430),
-              child: BottomNavigationBar(
-                elevation: 0,
-                backgroundColor: Colors.transparent,
-                currentIndex: currentTabIndex,
-                selectedItemColor: const Color(0xFF00E5FF),
-                unselectedItemColor: Colors.white38,
-                selectedLabelStyle:
-                    const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-                unselectedLabelStyle: const TextStyle(fontSize: 11),
-                type: BottomNavigationBarType.fixed,
-                onTap: (idx) => setState(() => currentTabIndex = idx),
-                items: const [
-                  BottomNavigationBarItem(
-                      icon: Icon(Icons.home_filled, size: 22), label: 'Главная'),
-                  BottomNavigationBarItem(
-                      icon: Icon(Icons.auto_awesome_motion, size: 22),
-                      label: 'Сценарии'),
-                  BottomNavigationBarItem(
-                      icon: Icon(Icons.history, size: 22), label: 'История'),
-                  BottomNavigationBarItem(
-                      icon: Icon(Icons.settings, size: 22), label: 'Настройки'),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+  String _sensorTitle(String key) {
+    switch (key) {
+      case 'airTemp':
+        return 'T внутри';
+      case 'outdoorTemp':
+        return 'T улицы';
+      case 'airHumidity':
+        return 'Влажность возд.';
+      case 'soilMoisture':
+        return 'Почва';
+      case 'lightLux':
+        return 'Свет';
+      case 'co2':
+        return 'CO₂';
+      case 'voltage':
+        return 'Напряжение';
+      case 'timeHour':
+        return 'Время';
+      default:
+        return key;
+    }
+  }
+
+  String _formatSensorValue(String key, double val) {
+    switch (key) {
+      case 'airTemp':
+      case 'outdoorTemp':
+        return '${val.toStringAsFixed(1)}°C';
+      case 'airHumidity':
+      case 'soilMoisture':
+        return '${val.toInt()}%';
+      case 'lightLux':
+        return '${val.toInt()} лк';
+      case 'co2':
+        return '${val.toInt()} ppm';
+      case 'voltage':
+        return '${val.toStringAsFixed(1)} В';
+      case 'timeHour':
+        return '${val.toInt().toString().padLeft(2, '0')}:00';
+      default:
+        return val.toStringAsFixed(1);
+    }
+  }
+
+  (double, double) _sensorRange(String key) {
+    switch (key) {
+      case 'airTemp':
+        return (5.0, 50.0);
+      case 'outdoorTemp':
+        return (-20.0, 45.0);
+      case 'airHumidity':
+      case 'soilMoisture':
+        return (0.0, 100.0);
+      case 'lightLux':
+        return (0.0, 1200.0);
+      case 'co2':
+        return (350.0, 2500.0);
+      case 'voltage':
+        return (9.0, 15.0);
+      case 'timeHour':
+        return (0.0, 23.0);
+      default:
+        return (0.0, 100.0);
+    }
+  }
+
+  double _defaultSensorThreshold(String key) {
+    switch (key) {
+      case 'airTemp':
+        return 26.0;
+      case 'outdoorTemp':
+        return 12.0;
+      case 'airHumidity':
+        return 70.0;
+      case 'soilMoisture':
+        return 35.0;
+      case 'lightLux':
+        return 300.0;
+      case 'co2':
+        return 900.0;
+      case 'voltage':
+        return 11.2;
+      case 'timeHour':
+        return 18.0;
+      default:
+        return 20.0;
+    }
   }
 }
 
-// =========================================================================
-// КНОПКА С УДЕРЖАНИЕМ 2.5 СЕКУНДЫ
-// =========================================================================
-class HoldToToggleGlassButton extends StatefulWidget {
-  final String label;
-  final String subtitle;
-  final IconData icon;
-  final bool isActive;
-  final Color activeColor;
-  final VoidCallback onConfirmed;
-
-  const HoldToToggleGlassButton({
-    super.key,
-    required this.label,
-    required this.subtitle,
-    required this.icon,
-    required this.isActive,
-    required this.activeColor,
-    required this.onConfirmed,
-  });
+// ==================== КНОПКА СМЕНЫ РЕЖИМА (УДЕРЖАНИЕ 1.5 СЕК) ====================
+class HoldModeButton extends StatefulWidget {
+  final GreenhouseMqttService mqtt;
+  const HoldModeButton({super.key, required this.mqtt});
 
   @override
-  State<HoldToToggleGlassButton> createState() =>
-      _HoldToToggleGlassButtonState();
+  State<HoldModeButton> createState() => _HoldModeButtonState();
 }
 
-class _HoldToToggleGlassButtonState extends State<HoldToToggleGlassButton>
+class _HoldModeButtonState extends State<HoldModeButton>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _holdCtrl;
+  late AnimationController _holdController;
 
   @override
   void initState() {
     super.initState();
-    _holdCtrl = AnimationController(
+    _holdController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2400),
+      duration: GreenhouseMqttService.modeHoldDuration, // 1500 мс (1.5 сек)
     )..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
-          widget.onConfirmed();
-          _holdCtrl.reset();
+          widget.mqtt.toggleControlMode();
+          _holdController.reset();
         }
       });
   }
 
   @override
   void dispose() {
-    _holdCtrl.dispose();
+    _holdController.dispose();
     super.dispose();
-  }
-
-  void _startHold() => _holdCtrl.forward();
-
-  void _cancelHold() {
-    if (_holdCtrl.isAnimating) {
-      _holdCtrl.reverse();
-    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isAuto = widget.mqtt.isAutoModeActive;
+    final isPending = widget.mqtt.isPendingMode;
+    final accent = isAuto ? const Color(0xFF00E676) : Colors.orangeAccent;
+
     return GestureDetector(
-      onTapDown: (_) => _startHold(),
-      onTapUp: (_) => _cancelHold(),
-      onTapCancel: _cancelHold,
-      onTap: () {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 1),
-            content: Text(
-                'Удерживайте кнопку "${widget.label}" 2.5 сек для переключения'),
-          ),
-        );
+      onTapDown: (_) {
+        if (!isPending) _holdController.forward();
       },
+      onTapUp: (_) => _holdController.reverse(),
+      onTapCancel: () => _holdController.reverse(),
       child: AnimatedBuilder(
-        animation: _holdCtrl,
+        animation: _holdController,
         builder: (context, _) {
-          final double progress = _holdCtrl.value;
-          return ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Stack(
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: accent.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: accent.withOpacity(0.6), width: 1.5),
+            ),
+            child: Column(
               children: [
-                Positioned.fill(
-                  child: FractionallySizedBox(
-                    alignment: Alignment.bottomCenter,
-                    heightFactor: progress,
-                    child: Container(
-                      color: widget.activeColor.withValues(alpha: 0.45),
-                    ),
-                  ),
-                ),
-                Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: progress > 0
-                          ? Colors.white
-                          : (widget.isActive
-                              ? widget.activeColor.withValues(alpha: 0.85)
-                              : Colors.white.withValues(alpha: 0.16)),
-                      width: progress > 0 ? 1.8 : 1.3,
-                    ),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: widget.isActive
-                          ? [
-                              widget.activeColor.withValues(alpha: 0.35),
-                              widget.activeColor.withValues(alpha: 0.10),
-                            ]
-                          : [
-                              Colors.white.withValues(alpha: 0.09),
-                              Colors.black.withValues(alpha: 0.28),
-                            ],
-                    ),
-                  ),
-                  child: Column(
-                    children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (isPending)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    else
                       Icon(
-                        widget.icon,
-                        color: widget.isActive
-                            ? widget.activeColor
-                            : Colors.white60,
-                        size: 22,
+                        isAuto ? Icons.hdr_auto : Icons.pan_tool_alt,
+                        color: accent,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        widget.label,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
+                    const SizedBox(width: 10),
+                    Text(
+                      isPending
+                          ? 'Ожидание ответа ESP32...'
+                          : (isAuto
+                              ? 'РЕЖИМ: АВТО (удерж. 1.5с)'
+                              : 'РЕЖИМ: РУЧНОЙ (удерж. 1.5с)'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: accent,
                       ),
-                      Text(
-                        progress > 0.05
-                            ? 'Ждите ${(progress * 100).toInt()}%...'
-                            : widget.subtitle,
-                        style: TextStyle(
-                          fontSize: 9.5,
-                          color: progress > 0.05
-                              ? Colors.white
-                              : (widget.isActive
-                                  ? widget.activeColor
-                                  : Colors.white38),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
+                if (_holdController.value > 0) ...[
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: _holdController.value,
+                      minHeight: 5,
+                      backgroundColor: Colors.white12,
+                      color: accent,
+                    ),
+                  ),
+                ],
               ],
             ),
           );
@@ -1954,516 +1784,4 @@ class _HoldToToggleGlassButtonState extends State<HoldToToggleGlassButton>
       ),
     );
   }
-}
-
-// =========================================================================
-// 3D-ДВИЖОК ТЕПЛИЦЫ (БЕЗ ЖЕЛТОГО ШТЫРЯ СБОКУ + НИЖНИЙ ПРИКОРНЕВОЙ ПОЛИВ)
-// =========================================================================
-class InteractiveGreenhouse3DPainter extends CustomPainter {
-  final double roofLeftAngle;
-  final double roofRightAngle;
-  final double doorFrontAngle;
-  final double doorBackAngle;
-  final bool isWatering;
-  final bool isPhytoLight;
-  final bool isWhiteLight;
-  final double timeOfDay;
-
-  InteractiveGreenhouse3DPainter({
-    required this.roofLeftAngle,
-    required this.roofRightAngle,
-    required this.doorFrontAngle,
-    required this.doorBackAngle,
-    required this.isWatering,
-    required this.isPhytoLight,
-    required this.isWhiteLight,
-    required this.timeOfDay,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double cx = size.width * 0.48;
-    final double cy = size.height * 0.58;
-
-    Offset iso(double x, double y, double z) {
-      final double px = cx + (x - y) * 0.866;
-      final double py = cy + (x + y) * 0.5 - z;
-      return Offset(px, py);
-    }
-
-    // 1. НЕБОСВОД
-    _drawSkyCelestialBody(canvas, size);
-
-    // 2. ПОДСВЕТКА ОСНОВАНИЯ
-    Color ambientColor = const Color(0xFF00E5FF);
-    if (isPhytoLight && isWhiteLight) {
-      ambientColor = const Color(0xFFFFB2FF);
-    } else if (isPhytoLight) {
-      ambientColor = const Color(0xFFFF40E5);
-    } else if (isWhiteLight) {
-      ambientColor = const Color(0xFFFFF59D);
-    }
-
-    final baseGlow = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          ambientColor.withValues(
-              alpha: (isPhytoLight || isWhiteLight) ? 0.36 : 0.2),
-          Colors.transparent,
-        ],
-      ).createShader(Rect.fromCircle(center: Offset(cx, cy + 35), radius: 165));
-    canvas.drawOval(
-        Rect.fromCenter(center: Offset(cx, cy + 40), width: 320, height: 155),
-        baseGlow);
-
-    // 3. ФУНДАМЕНТ И ПОЧВА
-    _drawPoly(
-      canvas,
-      [iso(-80, -98, -8), iso(80, -98, -8), iso(80, 98, -8), iso(-80, 98, -8)],
-      const Color(0xFF17212A),
-      const Color(0xFF3A5060),
-    );
-    _drawPoly(
-      canvas,
-      [iso(-74, -92, 0), iso(74, -92, 0), iso(74, 92, 0), iso(-74, 92, 0)],
-      const Color(0xFF2B2017),
-      const Color(0xFF4CA6A8).withValues(alpha: 0.45),
-    );
-
-    // 4. ЗАДНЯЯ СТЕНКА И ЗАДНЯЯ ДВЕРЬ
-    final glassFill = const Color(0xFF00E5FF).withValues(alpha: 0.11);
-    final frameEdge = const Color(0xFF5CE1E6).withValues(alpha: 0.75);
-
-    _drawPoly(
-      canvas,
-      [iso(-74, -92, 0), iso(-25, -92, 0), iso(-25, -92, 76), iso(-74, -92, 76)],
-      glassFill,
-      frameEdge,
-    );
-    _drawPoly(
-      canvas,
-      [iso(25, -92, 0), iso(74, -92, 0), iso(74, -92, 76), iso(25, -92, 76)],
-      glassFill,
-      frameEdge,
-    );
-    _drawPoly(
-      canvas,
-      [iso(-74, -92, 76), iso(74, -92, 76), iso(0, -92, 128)],
-      glassFill,
-      frameEdge,
-    );
-
-    const double backDoorW = 50.0;
-    final double backRad = doorBackAngle * math.pi / 180.0;
-    final double bdx = -25.0 + backDoorW * math.cos(backRad);
-    final double bdy = -92.0 - backDoorW * math.sin(backRad);
-
-    _drawPoly(
-      canvas,
-      [
-        iso(-25, -92, 0),
-        iso(bdx, bdy, 0),
-        iso(bdx, bdy, 74),
-        iso(-25, -92, 74),
-      ],
-      const Color(0xFF69F0AE).withValues(alpha: 0.28),
-      const Color(0xFF69F0AE),
-      strokeWidth: 2.0,
-    );
-
-    // 5. ГРЯДКИ С РАСТЕНИЯМИ
-    _drawBedWithPlants(canvas, iso, -56, -16, -78, 74);
-    _drawBedWithPlants(canvas, iso, 16, 56, -78, 74);
-
-    // 6. НИЖНИЙ ПРИКОРНЕВОЙ ПОЛИВ (прямо на земле у корней грядок!)
-    if (isWatering) {
-      _drawGroundLevelWatering(canvas, iso);
-    }
-
-    // 7. СВЕТОДИОДНЫЕ ЛЕНТЫ ПОД КОНЬКОМ
-    _drawInternalLedStrips(canvas, iso);
-
-    // 8. БОКОВЫЕ СТЕНЫ И КРЫША
-    _drawPoly(
-      canvas,
-      [iso(-74, -92, 0), iso(-74, 92, 0), iso(-74, 92, 76), iso(-74, -92, 76)],
-      glassFill,
-      frameEdge,
-    );
-    for (double y = -92; y < 88; y += 46) {
-      _drawPoly(
-        canvas,
-        [iso(74, y, 0), iso(74, y + 46, 0), iso(74, y + 46, 76), iso(74, y, 76)],
-        const Color(0xFF00E5FF).withValues(alpha: 0.13),
-        frameEdge,
-      );
-    }
-
-    _drawPoly(
-      canvas,
-      [iso(0, -92, 128), iso(74, -92, 76), iso(74, 92, 76), iso(0, 92, 128)],
-      const Color(0xFF00E5FF).withValues(alpha: 0.15),
-      frameEdge,
-    );
-    _drawPoly(
-      canvas,
-      [iso(0, -92, 128), iso(-74, -92, 76), iso(-74, 92, 76), iso(0, 92, 128)],
-      const Color(0xFF00E5FF).withValues(alpha: 0.12),
-      frameEdge,
-    );
-
-    // 9. ФОРТОЧКА №1 (Левый дальний скат)
-    final double basePitch = math.atan2(52, 74);
-    final double openRadLeft =
-        basePitch - (roofLeftAngle * math.pi / 180.0) * 0.85;
-    const double ventLen = 54.0;
-    final double vlx = -math.cos(openRadLeft) * ventLen;
-    final double vlz = 128.0 - math.sin(openRadLeft) * ventLen;
-
-    _drawPoly(
-      canvas,
-      [iso(0, -68, 128), iso(-48, -68, 94), iso(-48, -12, 94), iso(0, -12, 128)],
-      const Color(0xFF071016).withValues(alpha: 0.7),
-      const Color(0xFF00E5FF).withValues(alpha: 0.4),
-    );
-    _drawPoly(
-      canvas,
-      [iso(0, -68, 128), iso(vlx, -68, vlz), iso(vlx, -12, vlz), iso(0, -12, 128)],
-      const Color(0xFF00F0FF).withValues(alpha: 0.38),
-      const Color(0xFF90FFFF),
-      strokeWidth: 2.1,
-    );
-    canvas.drawLine(
-      iso(-25, -40, 110),
-      iso(vlx * 0.65, -40, vlz + 2),
-      Paint()
-        ..color = const Color(0xFF00E5FF)
-        ..strokeWidth = 2.0,
-    );
-
-    // 10. ФОРТОЧКА №2 (Правый ближний скат)
-    final double openRadRight =
-        basePitch - (roofRightAngle * math.pi / 180.0) * 0.85;
-    final double vrx = math.cos(openRadRight) * ventLen;
-    final double vrz = 128.0 - math.sin(openRadRight) * ventLen;
-
-    _drawPoly(
-      canvas,
-      [iso(0, 12, 128), iso(48, 12, 94), iso(48, 68, 94), iso(0, 68, 128)],
-      const Color(0xFF071016).withValues(alpha: 0.7),
-      const Color(0xFF40C4FF).withValues(alpha: 0.45),
-    );
-    _drawPoly(
-      canvas,
-      [iso(0, 12, 128), iso(vrx, 12, vrz), iso(vrx, 68, vrz), iso(0, 68, 128)],
-      const Color(0xFF40C4FF).withValues(alpha: 0.42),
-      const Color(0xFFB3E5FC),
-      strokeWidth: 2.2,
-    );
-    canvas.drawLine(
-      iso(25, 40, 110),
-      iso(vrx * 0.65, 40, vrz + 2),
-      Paint()
-        ..color = const Color(0xFF40C4FF)
-        ..strokeWidth = 2.0,
-    );
-
-    // 11. ПЕРЕДНИЙ ФАСАД И ПЕРЕДНЯЯ ДВЕРЬ
-    _drawPoly(
-      canvas,
-      [iso(-74, 92, 0), iso(-25, 92, 0), iso(-25, 92, 76), iso(-74, 92, 76)],
-      glassFill,
-      frameEdge,
-    );
-    _drawPoly(
-      canvas,
-      [iso(25, 92, 0), iso(74, 92, 0), iso(74, 92, 76), iso(25, 92, 76)],
-      glassFill,
-      frameEdge,
-    );
-    _drawPoly(
-      canvas,
-      [iso(-74, 92, 76), iso(74, 92, 76), iso(0, 92, 128)],
-      const Color(0xFF00E5FF).withValues(alpha: 0.16),
-      frameEdge,
-    );
-
-    const double frontDoorW = 50.0;
-    final double fRad = doorFrontAngle * math.pi / 180.0;
-    final double fdx = -25.0 + frontDoorW * math.cos(fRad);
-    final double fdy = 92.0 + frontDoorW * math.sin(fRad);
-
-    _drawPoly(
-      canvas,
-      [
-        iso(-25, 92, 0),
-        iso(fdx, fdy, 0),
-        iso(fdx, fdy, 74),
-        iso(-25, 92, 74),
-      ],
-      const Color(0xFF28E070).withValues(alpha: 0.30),
-      const Color(0xFF76FFAC),
-      strokeWidth: 2.2,
-    );
-  }
-
-  // Нижний прикорневой полив прямо на уровне грядок (z = 6..18)
-  void _drawGroundLevelWatering(
-      Canvas canvas, Offset Function(double, double, double) iso) {
-    final hosePaint = Paint()
-      ..color = const Color(0xFF00E5FF).withValues(alpha: 0.8)
-      ..strokeWidth = 2.0;
-
-    // Прикорневые шланги капельно-веерного полива лежат прямо вдоль земли (z = 7)
-    canvas.drawLine(iso(-18, -72, 7), iso(-18, 68, 7), hosePaint);
-    canvas.drawLine(iso(18, -72, 7), iso(18, 68, 7), hosePaint);
-
-    final streamPaint = Paint()
-      ..color = const Color(0xFF80F8FF).withValues(alpha: 0.9)
-      ..strokeWidth = 1.5
-      ..strokeCap = StrokeCap.round;
-
-    final dropPaint = Paint()..color = const Color(0xFF00E5FF);
-
-    for (double y = -58; y <= 58; y += 28) {
-      // Левая грядка: короткие полосочки струй бьют снизу (z=7) к корням кустов (-36, y, 14)
-      final Offset leftNozzle = iso(-18, y, 7);
-      canvas.drawLine(leftNozzle, iso(-32, y - 5, 15), streamPaint);
-      canvas.drawLine(leftNozzle, iso(-35, y, 16), streamPaint);
-      canvas.drawLine(leftNozzle, iso(-32, y + 5, 15), streamPaint);
-      canvas.drawCircle(iso(-38, y, 9), 2.6, dropPaint);
-
-      // Правая грядка: короткие полосочки струй бьют снизу (z=7) к корням кустов (36, y, 14)
-      final Offset rightNozzle = iso(18, y, 7);
-      canvas.drawLine(rightNozzle, iso(32, y - 5, 15), streamPaint);
-      canvas.drawLine(rightNozzle, iso(35, y, 16), streamPaint);
-      canvas.drawLine(rightNozzle, iso(32, y + 5, 15), streamPaint);
-      canvas.drawCircle(iso(38, y, 9), 2.6, dropPaint);
-    }
-  }
-
-  void _drawInternalLedStrips(
-      Canvas canvas, Offset Function(double, double, double) iso) {
-    if (isPhytoLight) {
-      _drawPoly(
-        canvas,
-        [
-          iso(-24, -76, 102),
-          iso(-58, -78, 6),
-          iso(-14, 76, 6),
-          iso(-24, 76, 102)
-        ],
-        const Color(0xFFFF00D4).withValues(alpha: 0.14),
-        Colors.transparent,
-      );
-      canvas.drawLine(
-        iso(-24, -80, 102),
-        iso(-24, 80, 102),
-        Paint()
-          ..color = const Color(0xFFFF40E5).withValues(alpha: 0.75)
-          ..strokeWidth = 10.0
-          ..strokeCap = StrokeCap.round
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7),
-      );
-    }
-
-    _drawPoly(
-      canvas,
-      [
-        iso(-27, -82, 103),
-        iso(-21, -82, 103),
-        iso(-21, 82, 103),
-        iso(-27, 82, 103)
-      ],
-      isPhytoLight ? const Color(0xFF4A154B) : const Color(0xFF1C2833),
-      isPhytoLight ? const Color(0xFFFF80FC) : Colors.white24,
-      strokeWidth: 1.1,
-    );
-
-    if (isPhytoLight) {
-      canvas.drawLine(
-        iso(-24, -80, 102.5),
-        iso(-24, 80, 102.5),
-        Paint()
-          ..color = const Color(0xFFFFB2FF)
-          ..strokeWidth = 2.6,
-      );
-      int idx = 0;
-      for (double y = -74; y <= 74; y += 14) {
-        final c = idx.isEven
-            ? const Color(0xFFFF4081)
-            : const Color(0xFFE040FB);
-        canvas.drawCircle(iso(-24, y, 102.5), 2.4, Paint()..color = c);
-        idx++;
-      }
-    }
-
-    if (isWhiteLight) {
-      _drawPoly(
-        canvas,
-        [
-          iso(24, -76, 102),
-          iso(14, -78, 6),
-          iso(58, 76, 6),
-          iso(24, 76, 102)
-        ],
-        const Color(0xFFFFF59D).withValues(alpha: 0.15),
-        Colors.transparent,
-      );
-      canvas.drawLine(
-        iso(24, -80, 102),
-        iso(24, 80, 102),
-        Paint()
-          ..color = const Color(0xFFFFEE58).withValues(alpha: 0.7)
-          ..strokeWidth = 10.0
-          ..strokeCap = StrokeCap.round
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7),
-      );
-    }
-
-    _drawPoly(
-      canvas,
-      [
-        iso(21, -82, 103),
-        iso(27, -82, 103),
-        iso(27, 82, 103),
-        iso(21, 82, 103)
-      ],
-      isWhiteLight ? const Color(0xFF4D4422) : const Color(0xFF1C2833),
-      isWhiteLight ? const Color(0xFFFFF59D) : Colors.white24,
-      strokeWidth: 1.1,
-    );
-
-    if (isWhiteLight) {
-      canvas.drawLine(
-        iso(24, -80, 102.5),
-        iso(24, 80, 102.5),
-        Paint()
-          ..color = Colors.white
-          ..strokeWidth = 2.6,
-      );
-      for (double y = -74; y <= 74; y += 14) {
-        canvas.drawCircle(
-            iso(24, y, 102.5), 2.3, Paint()..color = const Color(0xFFFFFDE7));
-      }
-    }
-  }
-
-  void _drawSkyCelestialBody(Canvas canvas, Size size) {
-    final bool isDay = timeOfDay >= 6.0 && timeOfDay <= 20.0;
-    final double progress = isDay
-        ? ((timeOfDay - 6.0) / 14.0).clamp(0.0, 1.0)
-        : (((timeOfDay > 20.0 ? timeOfDay - 20.0 : timeOfDay + 4.0)) / 10.0)
-            .clamp(0.0, 1.0);
-
-    final double arcX = 45 + progress * (size.width - 90);
-    final double arcY = 125 - math.sin(progress * math.pi) * 85;
-    final Offset center = Offset(arcX, arcY);
-
-    final trackPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.08)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-    final trackPath = Path();
-    for (double t = 0; t <= 1.0; t += 0.05) {
-      final px = 45 + t * (size.width - 90);
-      final py = 125 - math.sin(t * math.pi) * 85;
-      if (t == 0) {
-        trackPath.moveTo(px, py);
-      } else {
-        trackPath.lineTo(px, py);
-      }
-    }
-    canvas.drawPath(trackPath, trackPaint);
-
-    if (isDay) {
-      final bool isSunsetOrSunrise = timeOfDay < 8.0 || timeOfDay > 18.0;
-      final Color sunColor = isSunsetOrSunrise
-          ? const Color(0xFFFF6D3A)
-          : const Color(0xFFFFD54F);
-
-      canvas.drawCircle(
-        center,
-        28,
-        Paint()
-          ..shader = RadialGradient(
-            colors: [
-              sunColor.withValues(alpha: 0.55),
-              sunColor.withValues(alpha: 0.0),
-            ],
-          ).createShader(Rect.fromCircle(center: center, radius: 28)),
-      );
-      canvas.drawCircle(center, 11, Paint()..color = sunColor);
-    } else {
-      final starPaint = Paint()..color = Colors.white.withValues(alpha: 0.45);
-      canvas.drawCircle(const Offset(60, 40), 1.2, starPaint);
-      canvas.drawCircle(const Offset(140, 25), 1.5, starPaint);
-      canvas.drawCircle(const Offset(290, 35), 1.2, starPaint);
-      canvas.drawCircle(const Offset(340, 65), 1.4, starPaint);
-
-      canvas.drawCircle(
-        center,
-        18,
-        Paint()..color = const Color(0xFF90CAF9).withValues(alpha: 0.2),
-      );
-      canvas.drawCircle(center, 9, Paint()..color = const Color(0xFFE3F2FD));
-    }
-  }
-
-  void _drawBedWithPlants(
-      Canvas canvas,
-      Offset Function(double, double, double) iso,
-      double x1,
-      double x2,
-      double y1,
-      double y2) {
-    _drawPoly(
-      canvas,
-      [iso(x1, y1, 5), iso(x2, y1, 5), iso(x2, y2, 5), iso(x1, y2, 5)],
-      const Color(0xFF3E2D20),
-      const Color(0xFF5D7A68),
-      strokeWidth: 1.0,
-    );
-
-    final leafPaint = Paint()
-      ..color = const Color(0xFF28E070).withValues(alpha: 0.78)
-      ..style = PaintingStyle.fill;
-
-    final double mx = (x1 + x2) / 2;
-    for (double y = y1 + 20; y < y2 - 10; y += 28) {
-      final p = iso(mx, y, 14);
-      canvas.drawCircle(p, 6.5, leafPaint);
-      canvas.drawCircle(p.translate(-5.5, 3), 4.8, leafPaint);
-      canvas.drawCircle(p.translate(5.5, 3), 4.8, leafPaint);
-    }
-  }
-
-  void _drawPoly(
-    Canvas canvas,
-    List<Offset> pts,
-    Color fill,
-    Color stroke, {
-    double strokeWidth = 1.3,
-  }) {
-    final path = Path()..addPolygon(pts, true);
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = fill
-        ..style = PaintingStyle.fill,
-    );
-    if (stroke != Colors.transparent) {
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = stroke
-          ..strokeWidth = strokeWidth
-          ..style = PaintingStyle.stroke,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant InteractiveGreenhouse3DPainter oldDelegate) =>
-      true;
 }
