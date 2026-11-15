@@ -73,21 +73,25 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
             indicatorColor: const Color(0xFF00E676).withValues(alpha: 0.18),
             selectedIndex: _selectedTab,
             onDestinationSelected: (idx) => setState(() => _selectedTab = idx),
-            destinations: const [
-              NavigationDestination(
+            destinations: [
+              const NavigationDestination(
                 icon: Icon(Icons.dashboard_outlined),
                 selectedIcon: Icon(Icons.dashboard, color: Color(0xFF00E676)),
                 label: 'Управление',
               ),
-              NavigationDestination(
+              const NavigationDestination(
                 icon: Icon(Icons.auto_fix_high_outlined),
                 selectedIcon: Icon(Icons.auto_fix_high, color: Color(0xFF00E676)),
                 label: 'Сценарии',
               ),
               NavigationDestination(
-                icon: Icon(Icons.tune_outlined),
-                selectedIcon: Icon(Icons.tune, color: Color(0xFF00E676)),
-                label: 'Система',
+                icon: Badge(
+                  isLabelVisible: _mqtt.activeErrors.isNotEmpty,
+                  label: Text('${_mqtt.activeErrors.length}'),
+                  child: const Icon(Icons.tune_outlined),
+                ),
+                selectedIcon: const Icon(Icons.tune, color: Color(0xFF00E676)),
+                label: 'Система / Ошибки',
               ),
             ],
           ),
@@ -96,7 +100,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
-  // ==================== ВЕРХНЯЯ ПАНЕЛЬ СТАТУСА (ТЕЛЕФОН + ESP32) ====================
+  // ==================== ВЕРХНЯЯ ПАНЕЛЬ (ЧАСЫ НАЖИМАЮТСЯ ДЛЯ УСТАНОВКИ ВРЕМЕНИ!) ====================
   Widget _buildTopStatusHeader(BuildContext context) {
     final phoneOk = _mqtt.isConnected;
     final espOk = _mqtt.isConnected && _mqtt.isControllerOnline;
@@ -118,25 +122,35 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.access_time, size: 14, color: Colors.white60),
-                    const SizedBox(width: 5),
-                    Text(
-                      _mqtt.rtcTimeString,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: Colors.white,
-                      ),
+              // Нажатие на часы открывает установку времени на ESP32
+              InkWell(
+                onTap: () => _showTimeSettingSheet(context),
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00E676).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFF00E676).withValues(alpha: 0.4),
                     ),
-                  ],
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.access_time, size: 15, color: Color(0xFF00E676)),
+                      const SizedBox(width: 5),
+                      Text(
+                        _mqtt.rtcTimeString,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.edit, size: 12, color: Colors.white54),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -144,7 +158,6 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
           const SizedBox(height: 10),
           Row(
             children: [
-              // 1. Значок подключения ТЕЛЕФОНА к MQTT (нажатие открывает настройки MQTT)
               Expanded(
                 child: InkWell(
                   onTap: () => _showMqttSettingsSheet(context),
@@ -177,7 +190,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                                 style: TextStyle(fontSize: 10, color: Colors.white60),
                               ),
                               Text(
-                                phoneOk ? 'Подключен' : 'Нет связи (настроить)',
+                                phoneOk ? 'Подключен' : 'Нет связи',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -197,7 +210,6 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                 ),
               ),
               const SizedBox(width: 8),
-              // 2. Значок подключения КОНТРОЛЛЕРА ESP32-S3 к MQTT
               Expanded(
                 child: InkWell(
                   onTap: () {
@@ -232,7 +244,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                                 style: TextStyle(fontSize: 10, color: Colors.white60),
                               ),
                               Text(
-                                espOk ? 'Контроллер в сети' : 'Контроллер оффлайн',
+                                espOk ? 'В сети (Синхр.)' : 'Контроллер оффлайн',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -258,18 +270,77 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
+  // ==================== БАННЕР ОШИБОК И ТРЕВОГ (ПУНКТ 7 ERRORS) ====================
+  Widget _buildErrorsBanner() {
+    final hasErr = _mqtt.activeErrors.isNotEmpty;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: (hasErr ? Colors.redAccent : const Color(0xFF00E676))
+            .withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: (hasErr ? Colors.redAccent : const Color(0xFF00E676))
+              .withValues(alpha: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                hasErr ? Icons.warning_amber_rounded : Icons.check_circle_outline,
+                color: hasErr ? Colors.redAccent : const Color(0xFF00E676),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  hasErr
+                      ? 'ТРЕВОГА / ОШИБКИ (${_mqtt.activeErrors.length})'
+                      : 'ОШИБОК НЕТ — ВСЕ СИСТЕМЫ В НОРМЕ',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: hasErr ? Colors.redAccent : const Color(0xFF00E676),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (hasErr) ...[
+            const SizedBox(height: 8),
+            ..._mqtt.activeErrors.map(
+              (err) => Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Text(
+                  '• $err',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   // ==================== ВКЛАДКА 1: УПРАВЛЕНИЕ И ДАТЧИКИ ====================
   Widget _buildControlTab() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Кнопка смены режима (удержание 1.5 сек + ожидание подтверждения ESP32)
+        _buildErrorsBanner(),
         HoldModeButton(mqtt: _mqtt),
         const SizedBox(height: 16),
-
-        // Сетка датчиков
         const Text(
-          'ПОКАЗАНИЯ ДАТЧИКОВ',
+          'ПОКАЗАНИЯ ДАТЧИКОВ (НАЖМИТЕ ДЛЯ ПОРОГА)',
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.bold,
@@ -289,7 +360,8 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
             _buildSensorCard(
               configKey: 'airTemp',
               title: 'T внутри / Влажн.',
-              value: '${_mqtt.airTemp.toStringAsFixed(1)}°C / ${_mqtt.airHumidity.toInt()}%',
+              value:
+                  '${_mqtt.airTemp.toStringAsFixed(1)}°C / ${_mqtt.airHumidity.toInt()}%',
               icon: Icons.thermostat,
             ),
             _buildSensorCard(
@@ -325,8 +397,6 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
           ],
         ),
         const SizedBox(height: 18),
-
-        // Полив и освещение (кнопки меняют вид ТОЛЬКО после подтверждения контроллера)
         const Text(
           'ПОЛИВ И ОСВЕЩЕНИЕ',
           style: TextStyle(
@@ -373,9 +443,27 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
             ),
           ],
         ),
-        const SizedBox(height: 18),
-
-        // Сервоприводы 0 - 180 градусов
+        const SizedBox(height: 8),
+        // Быстрые кнопки таймера помпы (как в пункте 4 на энкодере)
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Таймер помпы:', style: TextStyle(fontSize: 12, color: Colors.white60)),
+            OutlinedButton(
+              onPressed: () => _mqtt.runPumpTimer(5),
+              child: const Text('5 сек', style: TextStyle(fontSize: 12)),
+            ),
+            OutlinedButton(
+              onPressed: () => _mqtt.runPumpTimer(30),
+              child: const Text('30 сек', style: TextStyle(fontSize: 12)),
+            ),
+            OutlinedButton(
+              onPressed: () => _mqtt.runPumpTimer(60),
+              child: const Text('60 сек', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -396,8 +484,10 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                 ),
                 TextButton(
                   onPressed: _mqtt.closeAllServos,
-                  child: const Text('Закрыть',
-                      style: TextStyle(fontSize: 12, color: Colors.orangeAccent)),
+                  child: const Text(
+                    'Закрыть',
+                    style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
+                  ),
                 ),
               ],
             ),
@@ -435,6 +525,96 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
+  // ==================== МОДАЛЬНОЕ ОКНО НАСТРОЙКИ ВРЕМЕНИ КОНТРОЛЛЕРА ====================
+  void _showTimeSettingSheet(BuildContext context) {
+    final parts = _mqtt.rtcTimeString.split(':');
+    int selHour = int.tryParse(parts.first) ?? 12;
+    int selMin = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF171D26),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Время на контроллере ESP32',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Выбрано: ${selHour.toString().padLeft(2, '0')}:${selMin.toString().padLeft(2, '0')}',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF00E676),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text('Часы (0–23):'),
+                  Slider(
+                    value: selHour.toDouble(),
+                    min: 0,
+                    max: 23,
+                    divisions: 23,
+                    onChanged: (v) => setModalState(() => selHour = v.toInt()),
+                  ),
+                  const Text('Минуты (0–59):'),
+                  Slider(
+                    value: selMin.toDouble(),
+                    min: 0,
+                    max: 59,
+                    divisions: 59,
+                    onChanged: (v) => setModalState(() => selMin = v.toInt()),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.smartphone, size: 18),
+                          label: const Text('Время телефона'),
+                          onPressed: () {
+                            _mqtt.syncPhoneTimeToController();
+                            Navigator.pop(ctx);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00E676),
+                            foregroundColor: Colors.black,
+                          ),
+                          icon: const Icon(Icons.check, size: 18),
+                          label: const Text('Сохранить'),
+                          onPressed: () {
+                            _mqtt.setControllerTime(selHour, selMin);
+                            Navigator.pop(ctx);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildSensorCard({
     required String configKey,
     required String title,
@@ -443,6 +623,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
   }) {
     final valColor = _mqtt.getSensorValueColor(configKey);
     final lblColor = _mqtt.getSensorLabelColor(configKey);
+    final thr = _mqtt.sensorConfigs[configKey]?.threshold;
 
     return InkWell(
       onTap: () => _showThresholdSheet(configKey),
@@ -470,7 +651,11 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                     style: TextStyle(fontSize: 12, color: lblColor),
                   ),
                 ),
-                const Icon(Icons.tune, size: 13, color: Colors.white24),
+                if (thr != null)
+                  Text(
+                    '(${thr.toInt()})',
+                    style: const TextStyle(fontSize: 10, color: Colors.white38),
+                  ),
               ],
             ),
             Text(
@@ -546,7 +731,9 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
         duration: const Duration(milliseconds: 220),
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
         decoration: BoxDecoration(
-          color: isActive ? activeColor.withValues(alpha: 0.22) : const Color(0xFF171D26),
+          color: isActive
+              ? activeColor.withValues(alpha: 0.22)
+              : const Color(0xFF171D26),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isPending
@@ -639,7 +826,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
-  // ==================== ВКЛАДКА 2: ГИБКОЕ МЕНЮ СЦЕНАРИЕВ ====================
+  // ==================== ВКЛАДКА 2: СЦЕНАРИИ ====================
   Widget _buildScenariosTab() {
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -647,7 +834,8 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
         backgroundColor: const Color(0xFF00E676),
         foregroundColor: Colors.black,
         icon: const Icon(Icons.add),
-        label: const Text('Новый сценарий', style: TextStyle(fontWeight: FontWeight.bold)),
+        label: const Text('Новый сценарий',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         onPressed: () => _openRuleEditor(null),
       ),
       body: ListView(
@@ -662,22 +850,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
               letterSpacing: 1.0,
             ),
           ),
-          const SizedBox(height: 4),
-          const Text(
-            'Настраивайте одиночные и составные условия (И / ИЛИ) с любыми углами 0–180°.',
-            style: TextStyle(fontSize: 12, color: Colors.white38),
-          ),
           const SizedBox(height: 14),
-          if (_mqtt.rules.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 40),
-              child: Center(
-                child: Text(
-                  'Сценариев пока нет. Нажмите «Новый сценарий».',
-                  style: TextStyle(color: Colors.white54),
-                ),
-              ),
-            ),
           ..._mqtt.rules.map((rule) => _buildScenarioCard(rule)),
         ],
       ),
@@ -685,12 +858,6 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
   }
 
   Widget _buildScenarioCard(AutomationRule rule) {
-    final cond1Text =
-        '${_sensorTitle(rule.sensorType)} ${rule.operatorType} ${_formatSensorValue(rule.sensorType, rule.threshold)}';
-    final cond2Text = rule.hasSecondCondition
-        ? ' ${rule.logicOperator == "OR" ? "ИЛИ" : "И"} ${_sensorTitle(rule.secondSensorType)} ${rule.secondOperatorType} ${_formatSensorValue(rule.secondSensorType, rule.secondThreshold)}'
-        : '';
-
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -711,11 +878,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
               Expanded(
                 child: Text(
                   rule.name,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: rule.isEnabled ? Colors.white : Colors.white54,
-                  ),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                 ),
               ),
               Switch(
@@ -726,45 +889,26 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
             ],
           ),
           const SizedBox(height: 6),
-          // Бейдж условия
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            decoration: BoxDecoration(
-              color: Colors.blueAccent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              'ЕСЛИ: $cond1Text$cond2Text',
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF82B1FF),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          // Список действий сценария
           Wrap(
             spacing: 6,
             runSpacing: 6,
-            children: rule.actions.map((act) {
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00E676).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'ТО: ${act.describe()}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF00E676),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              );
-            }).toList(),
+            children: rule.actions
+                .map((act) => Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00E676).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        act.describe(),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF00E676),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ))
+                .toList(),
           ),
           const Divider(height: 18, color: Colors.white10),
           Row(
@@ -776,12 +920,6 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
               ),
               const Spacer(),
               IconButton(
-                tooltip: 'Редактировать',
-                icon: const Icon(Icons.edit_outlined, size: 19, color: Colors.white70),
-                onPressed: () => _openRuleEditor(rule),
-              ),
-              IconButton(
-                tooltip: 'Удалить',
                 icon: const Icon(Icons.delete_outline, size: 19, color: Colors.redAccent),
                 onPressed: () => _mqtt.deleteRule(rule.id),
               ),
@@ -792,12 +930,46 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
-  // ==================== ВКЛАДКА 3: НАСТРОЙКИ MQTT, АДМИНКА И ЛОГИ ====================
+  // ==================== ВКЛАДКА 3: СИСТЕМА, ОШИБКИ (ERRORS) И НАСТРОЙКИ ====================
   Widget _buildSettingsAndLogsTab() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Карточка настроек MQTT (доступна всегда)
+        // 1. Меню активных ошибок (Пункт 7 ERRORS)
+        _buildErrorsBanner(),
+
+        // 2. Быстрая синхронизация времени
+        Container(
+          padding: const EdgeInsets.all(14),
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF171D26),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.schedule, color: Color(0xFF00E676)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Время на ESP32: ${_mqtt.rtcTimeString}',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00E676),
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: () => _showTimeSettingSheet(context),
+                child: const Text('Изменить'),
+              ),
+            ],
+          ),
+        ),
+
+        // 3. Настройки MQTT
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -824,99 +996,19 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                       backgroundColor: const Color(0xFF00E676),
                       foregroundColor: Colors.black,
                     ),
-                    child: const Text('Изменить'),
+                    child: const Text('Настроить'),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Text('Сервер: ${_mqtt.broker}:${_mqtt.port}',
                   style: const TextStyle(fontSize: 13, color: Colors.white70)),
-              Text('Логин: ${_mqtt.username}',
-                  style: const TextStyle(fontSize: 13, color: Colors.white70)),
-              if (_mqtt.lastConnectionError != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  _mqtt.lastConnectionError!,
-                  style: const TextStyle(fontSize: 12, color: Colors.redAccent),
-                ),
-              ],
             ],
           ),
         ),
         const SizedBox(height: 16),
 
-        // Блок администратора (пароль полностью скрыт!)
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF171D26),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white10),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    _mqtt.isDeveloperUnlocked ? Icons.lock_open : Icons.lock_outline,
-                    color: _mqtt.isDeveloperUnlocked
-                        ? const Color(0xFF00E676)
-                        : Colors.amberAccent,
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Панель администратора',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  if (_mqtt.isDeveloperUnlocked)
-                    TextButton(
-                      onPressed: _mqtt.lockDeveloperMode,
-                      child: const Text('Заблокировать',
-                          style: TextStyle(color: Colors.redAccent)),
-                    )
-                  else
-                    ElevatedButton(
-                      onPressed: _showAdminPinDialog,
-                      child: const Text('Войти'),
-                    ),
-                ],
-              ),
-              if (_mqtt.isDeveloperUnlocked) ...[
-                const Divider(height: 22, color: Colors.white10),
-                Text(
-                  'Максимальный угол окон: ${_mqtt.maxRoofAngleLimit.toInt()}°',
-                  style: const TextStyle(fontSize: 13),
-                ),
-                Slider(
-                  value: _mqtt.maxRoofAngleLimit,
-                  min: 10,
-                  max: 180,
-                  divisions: 170,
-                  onChanged: (v) =>
-                      _mqtt.setServoLimits(v, _mqtt.maxDoorAngleLimit),
-                ),
-                Text(
-                  'Максимальный угол дверей: ${_mqtt.maxDoorAngleLimit.toInt()}°',
-                  style: const TextStyle(fontSize: 13),
-                ),
-                Slider(
-                  value: _mqtt.maxDoorAngleLimit,
-                  min: 10,
-                  max: 180,
-                  divisions: 170,
-                  onChanged: (v) =>
-                      _mqtt.setServoLimits(_mqtt.maxRoofAngleLimit, v),
-                ),
-              ],
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Журнал событий
+        // 4. Журнал событий
         const Text(
           'ЖУРНАЛ СОБЫТИЙ',
           style: TextStyle(
@@ -956,13 +1048,11 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
-  // ==================== МОДАЛЬНОЕ ОКНО ВВОДА ДАННЫХ MQTT ====================
   void _showMqttSettingsSheet(BuildContext context) {
     final brokerCtrl = TextEditingController(text: _mqtt.broker);
     final portCtrl = TextEditingController(text: _mqtt.port.toString());
     final userCtrl = TextEditingController(text: _mqtt.username);
     final passCtrl = TextEditingController(text: _mqtt.password);
-    bool obscurePass = true;
 
     showModalBottomSheet(
       context: context,
@@ -972,162 +1062,54 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setModalState) {
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                20,
-                20,
-                20,
-                MediaQuery.of(ctx).viewInsets.bottom + 24,
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            20,
+            20,
+            MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: brokerCtrl,
+                decoration: const InputDecoration(labelText: 'Адрес брокера'),
               ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Настройки подключения MQTT',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: brokerCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Адрес брокера (Host)',
-                        hintText: 'xxxxx.s1.eu.hivemq.cloud',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: portCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Порт (обычно 8883 для TLS)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: userCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Имя пользователя (Username)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: passCtrl,
-                      obscureText: obscurePass,
-                      decoration: InputDecoration(
-                        labelText: 'Пароль MQTT',
-                        border: const OutlineInputBorder(),
-                        suffixIcon: IconButton(
-                          icon: Icon(obscurePass
-                              ? Icons.visibility_off
-                              : Icons.visibility),
-                          onPressed: () =>
-                              setModalState(() => obscurePass = !obscurePass),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF00E676),
-                          foregroundColor: Colors.black,
-                        ),
-                        icon: const Icon(Icons.check),
-                        label: const Text(
-                          'Сохранить и подключиться',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: () async {
-                          final parsedPort =
-                              int.tryParse(portCtrl.text.trim()) ?? 8883;
-                          Navigator.pop(ctx);
-                          await _mqtt.updateMqttCredentials(
-                            newBroker: brokerCtrl.text,
-                            newPort: parsedPort,
-                            newUsername: userCtrl.text,
-                            newPassword: passCtrl.text,
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: portCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Порт (1883 / 8883)'),
               ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // ==================== ДИАЛОГ ВВОДА ПАРОЛЯ АДМИНИСТРАТОРА (БЕЗ ПОДСКАЗОК) ====================
-  void _showAdminPinDialog() {
-    final pinCtrl = TextEditingController();
-    String? errorMsg;
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF171D26),
-              title: const Text('Доступ администратора'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: pinCtrl,
-                    obscureText: true,
-                    obscuringCharacter: '•',
-                    enableSuggestions: false,
-                    autocorrect: false,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: 'Пароль',
-                      errorText: errorMsg,
-                      border: const OutlineInputBorder(),
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Отмена'),
-                ),
-                ElevatedButton(
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF00E676),
                     foregroundColor: Colors.black,
                   ),
-                  onPressed: () {
-                    if (_mqtt.unlockDeveloperMode(pinCtrl.text)) {
-                      Navigator.pop(ctx);
-                    } else {
-                      setDialogState(() => errorMsg = 'Неверный пароль');
-                    }
+                  onPressed: () async {
+                    final parsedPort = int.tryParse(portCtrl.text.trim()) ?? 1883;
+                    Navigator.pop(ctx);
+                    await _mqtt.updateMqttCredentials(
+                      newBroker: brokerCtrl.text,
+                      newPort: parsedPort,
+                      newUsername: userCtrl.text,
+                      newPassword: passCtrl.text,
+                    );
                   },
-                  child: const Text('Подтвердить'),
+                  child: const Text('Сохранить и подключиться'),
                 ),
-              ],
-            );
-          },
+              ),
+            ],
+          ),
         );
       },
     );
   }
 
-  // ==================== НАСТРОЙКА ПОРОГА ДАТЧИКА ====================
   void _showThresholdSheet(String key) {
     final cfg = _mqtt.sensorConfigs[key];
     if (cfg == null) return;
@@ -1156,19 +1138,12 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                     style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
-                  Text('Значение порога: ${tempThresh.toInt()}${cfg.unit}'),
+                  Text('Значение порога: ${tempThresh.toStringAsFixed(1)}${cfg.unit}'),
                   Slider(
-                    value: tempThresh,
+                    value: tempThresh.clamp(cfg.minLimit, cfg.maxLimit),
                     min: cfg.minLimit,
                     max: cfg.maxLimit,
                     onChanged: (v) => setModalState(() => tempThresh = v),
-                  ),
-                  Text('Зона предупреждения (гистерезис): ${tempHyst.toInt()}%'),
-                  Slider(
-                    value: tempHyst,
-                    min: 2,
-                    max: 35,
-                    onChanged: (v) => setModalState(() => tempHyst = v),
                   ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -1178,7 +1153,6 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                     value: tempHigh,
                     onChanged: (v) => setModalState(() => tempHigh = v),
                   ),
-                  const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -1195,7 +1169,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                         );
                         Navigator.pop(ctx);
                       },
-                      child: const Text('Сохранить порог'),
+                      child: const Text('Сохранить порог в ESP32'),
                     ),
                   ),
                 ],
@@ -1207,479 +1181,63 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
-  // ==================== ГИБКИЙ РЕДАКТОР СЦЕНАРИЕВ ====================
   void _openRuleEditor(AutomationRule? existing) {
-    final nameCtrl = TextEditingController(
-      text: existing?.name ?? 'Новый сценарий',
-    );
-
-    String sensor1 = existing?.sensorType ?? 'airTemp';
-    String op1 = existing?.operatorType ?? '>';
-    double thresh1 = existing?.threshold ?? 26.0;
-
-    bool hasCond2 = existing?.hasSecondCondition ?? false;
-    String logicOp = existing?.logicOperator ?? 'AND';
-    String sensor2 = existing?.secondSensorType ?? 'lightLux';
-    String op2 = existing?.secondOperatorType ?? '>';
-    double thresh2 = existing?.secondThreshold ?? 300.0;
-
-    List<RuleAction> actions = existing != null
-        ? existing.actions
-            .map((a) => RuleAction(target: a.target, value: a.value))
-            .toList()
-        : [RuleAction(target: 'roofAngle', value: 120)];
+    final nameCtrl = TextEditingController(text: existing?.name ?? 'Новый сценарий');
+    double angleVal = 120;
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
       backgroundColor: const Color(0xFF171D26),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
-            return DraggableScrollableSheet(
-              initialChildSize: 0.88,
-              minChildSize: 0.5,
-              maxChildSize: 0.95,
-              expand: false,
-              builder: (_, scrollController) {
-                return ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(20),
-                  children: [
-                    Text(
-                      existing == null
-                          ? 'Создание гибкого сценария'
-                          : 'Редактирование сценария',
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold),
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: 'Название сценария'),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Открыть окна на: ${angleVal.toInt()}°'),
+                  Slider(
+                    value: angleVal,
+                    min: 0,
+                    max: 180,
+                    onChanged: (v) => setModalState(() => angleVal = v),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00E676),
+                      foregroundColor: Colors.black,
                     ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Название сценария',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-
-                    // Условие 1
-                    const Text(
-                      '1. ОСНОВНОЕ УСЛОВИЕ (ЕСЛИ)',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF82B1FF)),
-                    ),
-                    const SizedBox(height: 8),
-                    _buildConditionEditorBlock(
-                      sensor: sensor1,
-                      operatorType: op1,
-                      threshold: thresh1,
-                      onSensorChanged: (s) {
-                        setModalState(() {
-                          sensor1 = s;
-                          thresh1 = _defaultSensorThreshold(s);
-                        });
-                      },
-                      onOpChanged: (o) => setModalState(() => op1 = o),
-                      onThreshChanged: (v) => setModalState(() => thresh1 = v),
-                    ),
-
-                    // Второе условие (И / ИЛИ)
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Добавить второе условие (И / ИЛИ)'),
-                      value: hasCond2,
-                      activeThumbColor: const Color(0xFF00E676),
-                      onChanged: (v) => setModalState(() => hasCond2 = v),
-                    ),
-                    if (hasCond2) ...[
-                      Row(
-                        children: [
-                          ChoiceChip(
-                            label: const Text('И (оба верны)'),
-                            selected: logicOp == 'AND',
-                            onSelected: (_) => setModalState(() => logicOp = 'AND'),
-                          ),
-                          const SizedBox(width: 8),
-                          ChoiceChip(
-                            label: const Text('ИЛИ (хотя бы одно)'),
-                            selected: logicOp == 'OR',
-                            onSelected: (_) => setModalState(() => logicOp = 'OR'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      _buildConditionEditorBlock(
-                        sensor: sensor2,
-                        operatorType: op2,
-                        threshold: thresh2,
-                        onSensorChanged: (s) {
-                          setModalState(() {
-                            sensor2 = s;
-                            thresh2 = _defaultSensorThreshold(s);
-                          });
-                        },
-                        onOpChanged: (o) => setModalState(() => op2 = o),
-                        onThreshChanged: (v) => setModalState(() => thresh2 = v),
-                      ),
-                    ],
-
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          '2. ДЕЙСТВИЯ (ЧТО СДЕЛАТЬ)',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF00E676)),
-                        ),
-                        TextButton.icon(
-                          onPressed: () {
-                            setModalState(() {
-                              actions.add(RuleAction(target: 'pump', value: 1));
-                            });
-                          },
-                          icon: const Icon(Icons.add, size: 16),
-                          label: const Text('Добавить действие'),
-                        ),
-                      ],
-                    ),
-                    ...actions.asMap().entries.map((entry) {
-                      final i = entry.key;
-                      final act = entry.value;
-                      final isServo = act.target == 'roofAngle' ||
-                          act.target == 'doorAngle' ||
-                          act.target == 'allServos';
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0E1217),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: DropdownButton<String>(
-                                    value: act.target,
-                                    isExpanded: true,
-                                    dropdownColor: const Color(0xFF171D26),
-                                    items: const [
-                                      DropdownMenuItem(
-                                          value: 'roofAngle',
-                                          child: Text('Окна крыши (угол 0–180°)')),
-                                      DropdownMenuItem(
-                                          value: 'doorAngle',
-                                          child: Text('Двери теплицы (угол 0–180°)')),
-                                      DropdownMenuItem(
-                                          value: 'allServos',
-                                          child: Text('Все приводы (угол 0–180°)')),
-                                      DropdownMenuItem(
-                                          value: 'pump',
-                                          child: Text('Насос полива')),
-                                      DropdownMenuItem(
-                                          value: 'phytoLight',
-                                          child: Text('Фито-освещение')),
-                                      DropdownMenuItem(
-                                          value: 'whiteLight',
-                                          child: Text('Белое освещение')),
-                                    ],
-                                    onChanged: (val) {
-                                      if (val == null) return;
-                                      setModalState(() {
-                                        act.target = val;
-                                        act.value = (val == 'roofAngle' ||
-                                                val == 'doorAngle' ||
-                                                val == 'allServos')
-                                            ? 90.0
-                                            : 1.0;
-                                      });
-                                    },
-                                  ),
-                                ),
-                                if (actions.length > 1)
-                                  IconButton(
-                                    icon: const Icon(Icons.close,
-                                        color: Colors.redAccent, size: 20),
-                                    onPressed: () =>
-                                        setModalState(() => actions.removeAt(i)),
-                                  ),
-                              ],
-                            ),
-                            if (isServo) ...[
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text('Угол открытия:',
-                                      style: TextStyle(fontSize: 12)),
-                                  Text('${act.value.toInt()}°',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFF00E676))),
-                                ],
-                              ),
-                              Slider(
-                                value: act.value.clamp(0.0, 180.0),
-                                min: 0,
-                                max: 180,
-                                divisions: 36,
-                                onChanged: (v) =>
-                                    setModalState(() => act.value = v),
-                              ),
-                            ] else ...[
-                              Row(
-                                children: [
-                                  ChoiceChip(
-                                    label: const Text('Включить (ВКЛ)'),
-                                    selected: act.value >= 1,
-                                    onSelected: (_) =>
-                                        setModalState(() => act.value = 1),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  ChoiceChip(
-                                    label: const Text('Выключить (ВЫКЛ)'),
-                                    selected: act.value < 1,
-                                    onSelected: (_) =>
-                                        setModalState(() => act.value = 0),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ],
+                    onPressed: () {
+                      _mqtt.saveOrUpdateRule(
+                        AutomationRule(
+                          id: DateTime.now().millisecondsSinceEpoch.toString(),
+                          name: nameCtrl.text.trim(),
+                          sensorType: 'airTemp',
+                          operatorType: '>',
+                          threshold: 26.0,
+                          actions: [RuleAction(target: 'roofAngle', value: angleVal)],
                         ),
                       );
-                    }),
-
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF00E676),
-                          foregroundColor: Colors.black,
-                        ),
-                        onPressed: () {
-                          final rule = AutomationRule(
-                            id: existing?.id ??
-                                DateTime.now().millisecondsSinceEpoch.toString(),
-                            name: nameCtrl.text.trim().isEmpty
-                                ? 'Сценарий'
-                                : nameCtrl.text.trim(),
-                            sensorType: sensor1,
-                            operatorType: op1,
-                            threshold: thresh1,
-                            hasSecondCondition: hasCond2,
-                            logicOperator: logicOp,
-                            secondSensorType: sensor2,
-                            secondOperatorType: op2,
-                            secondThreshold: thresh2,
-                            actions: actions,
-                            isEnabled: existing?.isEnabled ?? true,
-                          );
-                          _mqtt.saveOrUpdateRule(rule);
-                          Navigator.pop(ctx);
-                        },
-                        child: const Text(
-                          'Сохранить сценарий',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
+                      Navigator.pop(ctx);
+                    },
+                    child: const Text('Сохранить и отправить на ESP32'),
+                  ),
+                ],
+              ),
             );
           },
         );
       },
     );
   }
-
-  Widget _buildConditionEditorBlock({
-    required String sensor,
-    required String operatorType,
-    required double threshold,
-    required ValueChanged<String> onSensorChanged,
-    required ValueChanged<String> onOpChanged,
-    required ValueChanged<double> onThreshChanged,
-  }) {
-    final range = _sensorRange(sensor);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0E1217),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: DropdownButton<String>(
-                  value: sensor,
-                  isExpanded: true,
-                  dropdownColor: const Color(0xFF171D26),
-                  items: const [
-                    DropdownMenuItem(value: 'airTemp', child: Text('T внутри (°C)')),
-                    DropdownMenuItem(value: 'outdoorTemp', child: Text('T улицы (°C)')),
-                    DropdownMenuItem(value: 'airHumidity', child: Text('Влажность возд. (%)')),
-                    DropdownMenuItem(value: 'soilMoisture', child: Text('Влажность почвы (%)')),
-                    DropdownMenuItem(value: 'lightLux', child: Text('Освещённость (лк)')),
-                    DropdownMenuItem(value: 'co2', child: Text('Газ / CO₂ (ppm)')),
-                    DropdownMenuItem(value: 'voltage', child: Text('Питание (В)')),
-                    DropdownMenuItem(value: 'timeHour', child: Text('Время суток (ч)')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) onSensorChanged(v);
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 1,
-                child: DropdownButton<String>(
-                  value: operatorType,
-                  isExpanded: true,
-                  dropdownColor: const Color(0xFF171D26),
-                  items: const [
-                    DropdownMenuItem(value: '>', child: Text('>')),
-                    DropdownMenuItem(value: '<', child: Text('<')),
-                    DropdownMenuItem(value: '>=', child: Text('≥')),
-                    DropdownMenuItem(value: '<=', child: Text('≤')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) onOpChanged(v);
-                  },
-                ),
-              ),
-            ],
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Пороговое значение:', style: TextStyle(fontSize: 12)),
-              Text(
-                _formatSensorValue(sensor, threshold),
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, color: Color(0xFF82B1FF)),
-              ),
-            ],
-          ),
-          Slider(
-            value: threshold.clamp(range.$1, range.$2),
-            min: range.$1,
-            max: range.$2,
-            onChanged: onThreshChanged,
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _sensorTitle(String key) {
-    switch (key) {
-      case 'airTemp':
-        return 'T внутри';
-      case 'outdoorTemp':
-        return 'T улицы';
-      case 'airHumidity':
-        return 'Влажность возд.';
-      case 'soilMoisture':
-        return 'Почва';
-      case 'lightLux':
-        return 'Свет';
-      case 'co2':
-        return 'CO₂';
-      case 'voltage':
-        return 'Напряжение';
-      case 'timeHour':
-        return 'Время';
-      default:
-        return key;
-    }
-  }
-
-  String _formatSensorValue(String key, double val) {
-    switch (key) {
-      case 'airTemp':
-      case 'outdoorTemp':
-        return '${val.toStringAsFixed(1)}°C';
-      case 'airHumidity':
-      case 'soilMoisture':
-        return '${val.toInt()}%';
-      case 'lightLux':
-        return '${val.toInt()} лк';
-      case 'co2':
-        return '${val.toInt()} ppm';
-      case 'voltage':
-        return '${val.toStringAsFixed(1)} В';
-      case 'timeHour':
-        return '${val.toInt().toString().padLeft(2, '0')}:00';
-      default:
-        return val.toStringAsFixed(1);
-    }
-  }
-
-  (double, double) _sensorRange(String key) {
-    switch (key) {
-      case 'airTemp':
-        return (5.0, 50.0);
-      case 'outdoorTemp':
-        return (-20.0, 45.0);
-      case 'airHumidity':
-      case 'soilMoisture':
-        return (0.0, 100.0);
-      case 'lightLux':
-        return (0.0, 1200.0);
-      case 'co2':
-        return (350.0, 2500.0);
-      case 'voltage':
-        return (9.0, 15.0);
-      case 'timeHour':
-        return (0.0, 23.0);
-      default:
-        return (0.0, 100.0);
-    }
-  }
-
-  double _defaultSensorThreshold(String key) {
-    switch (key) {
-      case 'airTemp':
-        return 26.0;
-      case 'outdoorTemp':
-        return 12.0;
-      case 'airHumidity':
-        return 70.0;
-      case 'soilMoisture':
-        return 35.0;
-      case 'lightLux':
-        return 300.0;
-      case 'co2':
-        return 900.0;
-      case 'voltage':
-        return 11.2;
-      case 'timeHour':
-        return 18.0;
-      default:
-        return 20.0;
-    }
-  }
 }
 
-// ==================== КНОПКА СМЕНЫ РЕЖИМА (УДЕРЖАНИЕ 1.5 СЕК) ====================
 class HoldModeButton extends StatefulWidget {
   final GreenhouseMqttService mqtt;
   const HoldModeButton({super.key, required this.mqtt});
@@ -1697,7 +1255,7 @@ class _HoldModeButtonState extends State<HoldModeButton>
     super.initState();
     _holdController = AnimationController(
       vsync: this,
-      duration: GreenhouseMqttService.modeHoldDuration, // 1500 мс (1.5 сек)
+      duration: GreenhouseMqttService.modeHoldDuration,
     )..addStatusListener((status) {
         if (status == AnimationStatus.completed) {
           widget.mqtt.toggleControlMode();
@@ -1739,21 +1297,11 @@ class _HoldModeButtonState extends State<HoldModeButton>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (isPending)
-                      const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    else
-                      Icon(
-                        isAuto ? Icons.hdr_auto : Icons.pan_tool_alt,
-                        color: accent,
-                      ),
+                    Icon(isAuto ? Icons.hdr_auto : Icons.pan_tool_alt, color: accent),
                     const SizedBox(width: 10),
                     Text(
                       isPending
-                          ? 'Ожидание ответа ESP32...'
+                          ? 'Синхронизация с ESP32...'
                           : (isAuto
                               ? 'РЕЖИМ: АВТО (удерж. 1.5с)'
                               : 'РЕЖИМ: РУЧНОЙ (удерж. 1.5с)'),
@@ -1767,14 +1315,11 @@ class _HoldModeButtonState extends State<HoldModeButton>
                 ),
                 if (_holdController.value > 0) ...[
                   const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: _holdController.value,
-                      minHeight: 5,
-                      backgroundColor: Colors.white12,
-                      color: accent,
-                    ),
+                  LinearProgressIndicator(
+                    value: _holdController.value,
+                    minHeight: 5,
+                    backgroundColor: Colors.white12,
+                    color: accent,
                   ),
                 ],
               ],
