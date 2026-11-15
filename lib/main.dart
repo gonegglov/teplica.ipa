@@ -70,7 +70,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
           ),
           bottomNavigationBar: NavigationBar(
             backgroundColor: const Color(0xFF131820),
-            indicatorColor: const Color(0xFF00E676).withOpacity(0.18),
+            indicatorColor: const Color(0xFF00E676).withValues(alpha: 0.18),
             selectedIndex: _selectedTab,
             onDestinationSelected: (idx) => setState(() => _selectedTab = idx),
             destinations: const [
@@ -121,7 +121,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.06),
+                  color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
@@ -153,11 +153,11 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
                       color: (phoneOk ? const Color(0xFF00E676) : Colors.redAccent)
-                          .withOpacity(0.12),
+                          .withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: (phoneOk ? const Color(0xFF00E676) : Colors.redAccent)
-                            .withOpacity(0.45),
+                            .withValues(alpha: 0.45),
                       ),
                     ),
                     child: Row(
@@ -208,11 +208,11 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
                       color: (espOk ? const Color(0xFF29B6F6) : Colors.orangeAccent)
-                          .withOpacity(0.12),
+                          .withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: (espOk ? const Color(0xFF29B6F6) : Colors.orangeAccent)
-                            .withOpacity(0.45),
+                            .withValues(alpha: 0.45),
                       ),
                     ),
                     child: Row(
@@ -546,7 +546,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
         duration: const Duration(milliseconds: 220),
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
         decoration: BoxDecoration(
-          color: isActive ? activeColor.withOpacity(0.22) : const Color(0xFF171D26),
+          color: isActive ? activeColor.withValues(alpha: 0.22) : const Color(0xFF171D26),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isPending
@@ -699,7 +699,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: rule.isEnabled
-              ? const Color(0xFF00E676).withOpacity(0.35)
+              ? const Color(0xFF00E676).withValues(alpha: 0.35)
               : Colors.white10,
         ),
       ),
@@ -720,7 +720,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
               ),
               Switch(
                 value: rule.isEnabled,
-                activeColor: const Color(0xFF00E676),
+                activeThumbColor: const Color(0xFF00E676),
                 onChanged: (v) => _mqtt.toggleRule(rule.id, v),
               ),
             ],
@@ -731,7 +731,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             decoration: BoxDecoration(
-              color: Colors.blueAccent.withOpacity(0.12),
+              color: Colors.blueAccent.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
@@ -752,7 +752,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
               return Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF00E676).withOpacity(0.12),
+                  color: const Color(0xFF00E676).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -1294,7 +1294,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Добавить второе условие (И / ИЛИ)'),
                       value: hasCond2,
-                      activeColor: const Color(0xFF00E676),
+                      activeThumbColor: const Color(0xFF00E676),
                       onChanged: (v) => setModalState(() => hasCond2 = v),
                     ),
                     if (hasCond2) ...[
@@ -1730,9 +1730,9 @@ class _HoldModeButtonState extends State<HoldModeButton>
           return Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.14),
+              color: accent.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: accent.withOpacity(0.6), width: 1.5),
+              border: Border.all(color: accent.withValues(alpha: 0.6), width: 1.5),
             ),
             child: Column(
               children: [
