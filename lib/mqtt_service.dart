@@ -15,6 +15,7 @@ class SensorThresholdConfig {
   double threshold;
   double hysteresisPercent;
   bool alertWhenHigh;
+  bool isEnabled;
 
   SensorThresholdConfig({
     required this.key,
@@ -25,12 +26,14 @@ class SensorThresholdConfig {
     required this.threshold,
     this.hysteresisPercent = 10.0,
     required this.alertWhenHigh,
+    this.isEnabled = true,
   });
 
   Map<String, dynamic> toJson() => {
         'threshold': threshold,
         'hysteresisPercent': hysteresisPercent,
         'alertWhenHigh': alertWhenHigh,
+        'isEnabled': isEnabled,
       };
 
   void applyFromJson(Map<String, dynamic> json) {
@@ -42,6 +45,9 @@ class SensorThresholdConfig {
     }
     if (json['alertWhenHigh'] != null) {
       alertWhenHigh = json['alertWhenHigh'] == true;
+    }
+    if (json['isEnabled'] != null) {
+      isEnabled = json['isEnabled'] == true;
     }
   }
 }
@@ -174,8 +180,8 @@ class AutomationRule {
 
 class GreenhouseMqttService extends ChangeNotifier {
   static const Duration modeHoldDuration = Duration(milliseconds: 1500);
-  static const Duration actuatorTimeoutDuration = Duration(milliseconds: 7500); // 7.5 сек таймаут
-  static const Duration errorDisplayDuration = Duration(seconds: 2); // 2 сек показ ошибки
+  static const Duration actuatorTimeoutDuration = Duration(milliseconds: 7500);
+  static const Duration errorDisplayDuration = Duration(seconds: 2);
 
   String broker = 'test.mosquitto.org';
   int port = 1883;
@@ -188,6 +194,9 @@ class GreenhouseMqttService extends ChangeNotifier {
   String? lastConnectionError;
   DateTime _lastEspPacketTime = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _watchdogTimer;
+
+  // Защита ползунков сервоприводов от дрожания при перетаскивании
+  DateTime _ignoreIncomingServoUntil = DateTime.fromMillisecondsSinceEpoch(0);
 
   // Показания датчиков и часов ESP32
   double airTemp = 24.5;
@@ -243,7 +252,7 @@ class GreenhouseMqttService extends ChangeNotifier {
   final Map<String, SensorThresholdConfig> sensorConfigs = {
     'airTemp': SensorThresholdConfig(
       key: 'airTemp',
-      name: 'Температура внутри',
+      name: 'Температура внутри (BME280)',
       unit: '°C',
       minLimit: 5,
       maxLimit: 50,
@@ -252,7 +261,7 @@ class GreenhouseMqttService extends ChangeNotifier {
     ),
     'outdoorTemp': SensorThresholdConfig(
       key: 'outdoorTemp',
-      name: 'Температура на улице',
+      name: 'Температура улицы (DS18B20)',
       unit: '°C',
       minLimit: -20,
       maxLimit: 45,
@@ -261,7 +270,7 @@ class GreenhouseMqttService extends ChangeNotifier {
     ),
     'airHumidity': SensorThresholdConfig(
       key: 'airHumidity',
-      name: 'Влажность воздуха',
+      name: 'Влажность воздуха (BME280)',
       unit: '%',
       minLimit: 10,
       maxLimit: 100,
@@ -270,7 +279,7 @@ class GreenhouseMqttService extends ChangeNotifier {
     ),
     'soilMoisture': SensorThresholdConfig(
       key: 'soilMoisture',
-      name: 'Влажность почвы',
+      name: 'Влажность почвы (ADC)',
       unit: '%',
       minLimit: 5,
       maxLimit: 100,
@@ -279,7 +288,7 @@ class GreenhouseMqttService extends ChangeNotifier {
     ),
     'lightLux': SensorThresholdConfig(
       key: 'lightLux',
-      name: 'Освещённость',
+      name: 'Освещённость (Фоторезистор)',
       unit: ' лк',
       minLimit: 0,
       maxLimit: 1200,
@@ -288,7 +297,7 @@ class GreenhouseMqttService extends ChangeNotifier {
     ),
     'co2': SensorThresholdConfig(
       key: 'co2',
-      name: 'Уровень CO₂',
+      name: 'Уровень газа / CO₂ (MQ135)',
       unit: ' ppm',
       minLimit: 350,
       maxLimit: 2500,
@@ -305,7 +314,7 @@ class GreenhouseMqttService extends ChangeNotifier {
     await _loadFromCache();
     await connect();
 
-    // Частый опрос состояния подключения ESP32 к MQTT (каждые 2 секунды)
+    // Опрос живого присутствия ESP32 каждые 2 секунды
     _watchdogTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (isConnected) {
         _publish('greenhouse/status/ping', '1');
@@ -342,7 +351,6 @@ class GreenhouseMqttService extends ChangeNotifier {
       maxRoofAngleLimit = prefs.getDouble('limit_roof') ?? 180.0;
       maxDoorAngleLimit = prefs.getDouble('limit_door') ?? 180.0;
 
-      // Загрузка порогов датчиков
       final thrJson = prefs.getString('sensor_thresholds');
       if (thrJson != null && thrJson.isNotEmpty) {
         final decoded = jsonDecode(thrJson) as Map<String, dynamic>;
@@ -353,7 +361,6 @@ class GreenhouseMqttService extends ChangeNotifier {
         });
       }
 
-      // Загрузка сценариев и их состояний (ВКЛ / ВЫКЛ)
       final rulesJson = prefs.getString('automation_rules');
       if (rulesJson != null && rulesJson.isNotEmpty) {
         final list = jsonDecode(rulesJson) as List;
@@ -432,6 +439,7 @@ class GreenhouseMqttService extends ChangeNotifier {
   // ==================== ПОДКЛЮЧЕНИЕ К MQTT ====================
   Future<void> connect() async {
     _client?.disconnect();
+    isControllerOnline = false;
     final clientId = 'Flutter_GH_${Random().nextInt(99999)}';
     _client = MqttServerClient.withPort(broker, clientId, port);
     _client!.logging(on: false);
@@ -463,10 +471,13 @@ class GreenhouseMqttService extends ChangeNotifier {
 
     if (_client!.connectionStatus?.state == MqttConnectionState.connected) {
       isConnected = true;
+      isControllerOnline = false; // Ждём реального живого ответа от ESP32
       _addLog('Подключено к MQTT ($broker:$port)');
       _subscribeAllTopics();
       _syncRulesToEsp();
+      _syncEnabledSensorsToEsp();
       requestFullStatus();
+      _publish('greenhouse/status/ping', '1');
       notifyListeners();
     } else {
       isConnected = false;
@@ -483,36 +494,56 @@ class GreenhouseMqttService extends ChangeNotifier {
     _client!.subscribe('greenhouse/state/#', MqttQos.atLeastOnce);
     _client!.subscribe('greenhouse/status/#', MqttQos.atLeastOnce);
     _client!.subscribe('greenhouse/errors/#', MqttQos.atLeastOnce);
-    _client!.subscribe('greenhouse/scenarios/state', MqttQos.atLeastOnce);
 
     _client!.updates?.listen((List<MqttReceivedMessage<MqttMessage?>>? c) {
       if (c == null || c.isEmpty) return;
       final recMess = c[0].payload as MqttPublishMessage;
       final topic = c[0].topic;
+      final isRetained = recMess.header?.retain ?? false;
       final payload =
           MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
-      _handleIncomingMessage(topic, payload);
+      _handleIncomingMessage(topic, payload, isRetained: isRetained);
     });
   }
 
   // ==================== ПРИЁМ ДАННЫХ ОТ ESP32 ====================
-  void _handleIncomingMessage(String topic, String payload) {
-    _lastEspPacketTime = DateTime.now();
-    if (!isControllerOnline) {
-      isControllerOnline = true;
+  void _handleIncomingMessage(String topic, String payload, {bool isRetained = false}) {
+    // Игнорируем собственные исходящие запросы
+    if (topic == 'greenhouse/status/ping' || topic == 'greenhouse/status/get') {
+      return;
     }
 
+    // Если брокер прислал Last Will '0' — контроллер точно оффлайн
     if (topic == 'greenhouse/status/online') {
-      isControllerOnline = (payload.trim() == '1');
-      notifyListeners();
+      if (payload.trim() == '0') {
+        isControllerOnline = false;
+        notifyListeners();
+      } else if (!isRetained && payload.trim() == '1') {
+        _lastEspPacketTime = DateTime.now();
+        isControllerOnline = true;
+        notifyListeners();
+      }
       return;
+    }
+
+    // Статус "В сети" засчитывается ТОЛЬКО от живых (не сохранённых в брокере) пакетов ESP32!
+    if (!isRetained) {
+      _lastEspPacketTime = DateTime.now();
+      if (!isControllerOnline) {
+        isControllerOnline = true;
+      }
     }
 
     if (topic == 'greenhouse/status/pong') {
-      isControllerOnline = true;
-      notifyListeners();
+      if (!isRetained) {
+        _lastEspPacketTime = DateTime.now();
+        isControllerOnline = true;
+        notifyListeners();
+      }
       return;
     }
+
+    final bool canUpdateServos = DateTime.now().isAfter(_ignoreIncomingServoUntil);
 
     if (topic == 'greenhouse/telemetry/all') {
       try {
@@ -526,36 +557,40 @@ class GreenhouseMqttService extends ChangeNotifier {
         if (data['voltage'] != null) voltage = (data['voltage'] as num).toDouble();
         if (data['time'] != null) rtcTimeString = data['time'].toString();
 
-        // Если состояние подтверждено контроллером (или изменено вручную на ESP32)
-        if (data['pump'] != null) {
-          final newPump = (data['pump'] == 1 || data['pump'] == true);
-          if (!isPendingWatering || newPump != isWateringActive) {
-            _confirmWateringState(newPump);
+        if (!isRetained) {
+          if (data['pump'] != null) {
+            final newPump = (data['pump'] == 1 || data['pump'] == true);
+            if (!isPendingWatering || newPump != isWateringActive) {
+              _confirmWateringState(newPump);
+            }
           }
-        }
-        if (data['phyto'] != null) {
-          final newPhyto = (data['phyto'] == 1 || data['phyto'] == true);
-          if (!isPendingPhyto || newPhyto != isPhytoLightActive) {
-            _confirmPhytoState(newPhyto);
+          if (data['phyto'] != null) {
+            final newPhyto = (data['phyto'] == 1 || data['phyto'] == true);
+            if (!isPendingPhyto || newPhyto != isPhytoLightActive) {
+              _confirmPhytoState(newPhyto);
+            }
           }
-        }
-        if (data['white'] != null) {
-          final newWhite = (data['white'] == 1 || data['white'] == true);
-          if (!isPendingWhite || newWhite != isWhiteLightActive) {
-            _confirmWhiteState(newWhite);
+          if (data['white'] != null) {
+            final newWhite = (data['white'] == 1 || data['white'] == true);
+            if (!isPendingWhite || newWhite != isWhiteLightActive) {
+              _confirmWhiteState(newWhite);
+            }
           }
-        }
-        if (data['mode'] != null) {
-          final newAuto = (data['mode'].toString() == 'auto');
-          if (!isPendingMode || newAuto != isAutoModeActive) {
-            _confirmModeState(newAuto);
+          if (data['mode'] != null) {
+            final newAuto = (data['mode'].toString() == 'auto');
+            if (!isPendingMode || newAuto != isAutoModeActive) {
+              _confirmModeState(newAuto);
+            }
           }
         }
 
-        if (data['roofLeft'] != null) roofLeftAngle = (data['roofLeft'] as num).toDouble();
-        if (data['roofRight'] != null) roofRightAngle = (data['roofRight'] as num).toDouble();
-        if (data['doorFront'] != null) doorFrontAngle = (data['doorFront'] as num).toDouble();
-        if (data['doorBack'] != null) doorBackAngle = (data['doorBack'] as num).toDouble();
+        // Обновляем ползунки сервоприводов только если пользователь сейчас не двигает их пальцем
+        if (canUpdateServos) {
+          if (data['roofLeft'] != null) roofLeftAngle = (data['roofLeft'] as num).toDouble();
+          if (data['roofRight'] != null) roofRightAngle = (data['roofRight'] as num).toDouble();
+          if (data['doorFront'] != null) doorFrontAngle = (data['doorFront'] as num).toDouble();
+          if (data['doorBack'] != null) doorBackAngle = (data['doorBack'] as num).toDouble();
+        }
 
         if (data['thresholds'] is Map) {
           final thrMap = data['thresholds'] as Map;
@@ -578,24 +613,23 @@ class GreenhouseMqttService extends ChangeNotifier {
       return;
     }
 
-    // Мгновенные подтверждения от ESP32 (снимают таймер ожидания 7.5с)
     if (topic == 'greenhouse/state/time') {
       rtcTimeString = payload.trim();
-    } else if (topic == 'greenhouse/state/mode') {
+    } else if (topic == 'greenhouse/state/mode' && !isRetained) {
       _confirmModeState(payload.trim() == 'auto');
-    } else if (topic == 'greenhouse/state/pump') {
+    } else if (topic == 'greenhouse/state/pump' && !isRetained) {
       _confirmWateringState(payload.trim() == '1');
-    } else if (topic == 'greenhouse/state/phyto') {
+    } else if (topic == 'greenhouse/state/phyto' && !isRetained) {
       _confirmPhytoState(payload.trim() == '1');
-    } else if (topic == 'greenhouse/state/white') {
+    } else if (topic == 'greenhouse/state/white' && !isRetained) {
       _confirmWhiteState(payload.trim() == '1');
-    } else if (topic == 'greenhouse/state/roof_left') {
+    } else if (topic == 'greenhouse/state/roof_left' && canUpdateServos) {
       roofLeftAngle = double.tryParse(payload) ?? roofLeftAngle;
-    } else if (topic == 'greenhouse/state/roof_right') {
+    } else if (topic == 'greenhouse/state/roof_right' && canUpdateServos) {
       roofRightAngle = double.tryParse(payload) ?? roofRightAngle;
-    } else if (topic == 'greenhouse/state/door_front') {
+    } else if (topic == 'greenhouse/state/door_front' && canUpdateServos) {
       doorFrontAngle = double.tryParse(payload) ?? doorFrontAngle;
-    } else if (topic == 'greenhouse/state/door_back') {
+    } else if (topic == 'greenhouse/state/door_back' && canUpdateServos) {
       doorBackAngle = double.tryParse(payload) ?? doorBackAngle;
     } else if (topic.startsWith('greenhouse/state/threshold/')) {
       final key = topic.split('/').last;
@@ -617,7 +651,6 @@ class GreenhouseMqttService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Подтверждение команд от ESP32 (отмена таймаута ошибки)
   void _confirmModeState(bool autoMode) {
     _modeTimeoutTimer?.cancel();
     isPendingMode = false;
@@ -666,6 +699,23 @@ class GreenhouseMqttService extends ChangeNotifier {
 
   void requestFullStatus() {
     _publish('greenhouse/status/get', '1');
+  }
+
+  // ==================== ВКЛЮЧЕНИЕ / ОТКЛЮЧЕНИЕ ДАТЧИКОВ В АДМИНКЕ ====================
+  void toggleSensorEnabled(String key, bool enabled) {
+    final cfg = sensorConfigs[key];
+    if (cfg == null) return;
+    cfg.isEnabled = enabled;
+    _saveToCache();
+    _syncEnabledSensorsToEsp();
+    _addLog('Датчик «${cfg.name}» → ${enabled ? "ВКЛЮЧЕН" : "ОТКЛЮЧЕН"}');
+    notifyListeners();
+  }
+
+  void _syncEnabledSensorsToEsp() {
+    final map = <String, bool>{};
+    sensorConfigs.forEach((k, v) => map[k] = v.isEnabled);
+    _publish('greenhouse/sensors/enabled/set', jsonEncode(map), retain: true);
   }
 
   // ==================== УПРАВЛЕНИЕ С ТАЙМАУТОМ 7.5 СЕК И ОШИБКОЙ НА 2 СЕК ====================
@@ -788,7 +838,7 @@ class GreenhouseMqttService extends ChangeNotifier {
     });
   }
 
-  // ==================== ВРЕМЯ, СЕРВОПРИВОДЫ И ПОРОГИ ====================
+  // ==================== ВРЕМЯ И СЕРВОПРИВОДЫ (БЕЗ ДРОЖАНИЯ ПОЛЗУНКА) ====================
   void setControllerTime(int hour, int minute) {
     final formatted =
         '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
@@ -803,7 +853,34 @@ class GreenhouseMqttService extends ChangeNotifier {
     setControllerTime(now.hour, now.minute);
   }
 
+  // Плавное перемещение ползунка на экране без спама в MQTT и без отскоков
+  void previewRoofLeftAngle(double val) {
+    _ignoreIncomingServoUntil = DateTime.now().add(const Duration(seconds: 3));
+    roofLeftAngle = val.clamp(0.0, maxRoofAngleLimit);
+    notifyListeners();
+  }
+
+  void previewRoofRightAngle(double val) {
+    _ignoreIncomingServoUntil = DateTime.now().add(const Duration(seconds: 3));
+    roofRightAngle = val.clamp(0.0, maxRoofAngleLimit);
+    notifyListeners();
+  }
+
+  void previewDoorFrontAngle(double val) {
+    _ignoreIncomingServoUntil = DateTime.now().add(const Duration(seconds: 3));
+    doorFrontAngle = val.clamp(0.0, maxDoorAngleLimit);
+    notifyListeners();
+  }
+
+  void previewDoorBackAngle(double val) {
+    _ignoreIncomingServoUntil = DateTime.now().add(const Duration(seconds: 3));
+    doorBackAngle = val.clamp(0.0, maxDoorAngleLimit);
+    notifyListeners();
+  }
+
+  // Фиксация ползунка: отправляет целевой угол на ESP32, чтобы окно открылось до него
   void setRoofLeftAngle(double val, {bool log = true}) {
+    _ignoreIncomingServoUntil = DateTime.now().add(const Duration(seconds: 3));
     roofLeftAngle = val.clamp(0.0, maxRoofAngleLimit);
     _publish('greenhouse/servo/roof_left/set', roofLeftAngle.toInt().toString());
     if (log) {
@@ -814,6 +891,7 @@ class GreenhouseMqttService extends ChangeNotifier {
   }
 
   void setRoofRightAngle(double val, {bool log = true}) {
+    _ignoreIncomingServoUntil = DateTime.now().add(const Duration(seconds: 3));
     roofRightAngle = val.clamp(0.0, maxRoofAngleLimit);
     _publish('greenhouse/servo/roof_right/set', roofRightAngle.toInt().toString());
     if (log) {
@@ -824,6 +902,7 @@ class GreenhouseMqttService extends ChangeNotifier {
   }
 
   void setDoorFrontAngle(double val, {bool log = true}) {
+    _ignoreIncomingServoUntil = DateTime.now().add(const Duration(seconds: 3));
     doorFrontAngle = val.clamp(0.0, maxDoorAngleLimit);
     _publish('greenhouse/servo/door_front/set', doorFrontAngle.toInt().toString());
     if (log) {
@@ -834,6 +913,7 @@ class GreenhouseMqttService extends ChangeNotifier {
   }
 
   void setDoorBackAngle(double val, {bool log = true}) {
+    _ignoreIncomingServoUntil = DateTime.now().add(const Duration(seconds: 3));
     doorBackAngle = val.clamp(0.0, maxDoorAngleLimit);
     _publish('greenhouse/servo/door_back/set', doorBackAngle.toInt().toString());
     if (log) {
@@ -877,6 +957,7 @@ class GreenhouseMqttService extends ChangeNotifier {
       'threshold': double.parse(threshold.toStringAsFixed(1)),
       'hysteresisPercent': hysteresisPercent,
       'alertWhenHigh': alertWhenHigh,
+      'isEnabled': cfg.isEnabled,
     });
     _publish('greenhouse/threshold/$key', payload, retain: true);
     _saveToCache();
@@ -886,7 +967,7 @@ class GreenhouseMqttService extends ChangeNotifier {
 
   Color getSensorValueColor(String key) {
     final cfg = sensorConfigs[key];
-    if (cfg == null) return const Color(0xFF00E676);
+    if (cfg == null || !cfg.isEnabled) return Colors.white38;
     final val = _getSensorValueByKey(key);
     final breached =
         cfg.alertWhenHigh ? (val > cfg.threshold) : (val < cfg.threshold);
@@ -894,7 +975,11 @@ class GreenhouseMqttService extends ChangeNotifier {
     return const Color(0xFF00E676);
   }
 
-  Color getSensorLabelColor(String key) => Colors.white70;
+  Color getSensorLabelColor(String key) {
+    final cfg = sensorConfigs[key];
+    if (cfg != null && !cfg.isEnabled) return Colors.white38;
+    return Colors.white70;
+  }
 
   double _getSensorValueByKey(String key) {
     switch (key) {
@@ -956,6 +1041,8 @@ class GreenhouseMqttService extends ChangeNotifier {
   }
 
   bool _checkSingleCondition(String sensor, String op, double thr) {
+    final cfg = sensorConfigs[sensor];
+    if (cfg != null && !cfg.isEnabled) return false;
     final v = _getSensorValueByKey(sensor);
     switch (op) {
       case '>':
@@ -1077,7 +1164,6 @@ class GreenhouseMqttService extends ChangeNotifier {
       notifyListeners();
       return true;
     } else {
-      // Отправляем сигнал на ESP32: пропищать 4 раза с задержкой 0.2 сек!
       _publish('greenhouse/buzzer/alert', 'wrong_pin');
       _addLog('ОШИБКА: Неверный ввод пароля администратора!');
       notifyListeners();

@@ -332,6 +332,24 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
 
   // ==================== ВКЛАДКА 1: УПРАВЛЕНИЕ И ДАТЧИКИ ====================
   Widget _buildControlTab() {
+    final airTempOn = _mqtt.sensorConfigs['airTemp']?.isEnabled ?? true;
+    final airHumOn = _mqtt.sensorConfigs['airHumidity']?.isEnabled ?? true;
+    final outTempOn = _mqtt.sensorConfigs['outdoorTemp']?.isEnabled ?? true;
+    final soilOn = _mqtt.sensorConfigs['soilMoisture']?.isEnabled ?? true;
+    final luxOn = _mqtt.sensorConfigs['lightLux']?.isEnabled ?? true;
+    final co2On = _mqtt.sensorConfigs['co2']?.isEnabled ?? true;
+
+    String indoorText;
+    if (!airTempOn && !airHumOn) {
+      indoorText = 'Отключён';
+    } else if (airTempOn && !airHumOn) {
+      indoorText = '${_mqtt.airTemp.toStringAsFixed(1)}°C / Выкл';
+    } else if (!airTempOn && airHumOn) {
+      indoorText = 'Выкл / ${_mqtt.airHumidity.toInt()}%';
+    } else {
+      indoorText = '${_mqtt.airTemp.toStringAsFixed(1)}°C / ${_mqtt.airHumidity.toInt()}%';
+    }
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -359,32 +377,31 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
             _buildSensorCard(
               configKey: 'airTemp',
               title: 'T внутри / Влажн.',
-              value:
-                  '${_mqtt.airTemp.toStringAsFixed(1)}°C / ${_mqtt.airHumidity.toInt()}%',
+              value: indoorText,
               icon: Icons.thermostat,
             ),
             _buildSensorCard(
               configKey: 'outdoorTemp',
               title: 'T на улице',
-              value: '${_mqtt.outdoorTemp.toStringAsFixed(1)}°C',
+              value: outTempOn ? '${_mqtt.outdoorTemp.toStringAsFixed(1)}°C' : 'Отключён',
               icon: Icons.ac_unit,
             ),
             _buildSensorCard(
               configKey: 'soilMoisture',
               title: 'Влажность почвы',
-              value: '${_mqtt.soilMoisture.toInt()}%',
+              value: soilOn ? '${_mqtt.soilMoisture.toInt()}%' : 'Отключён',
               icon: Icons.water_drop,
             ),
             _buildSensorCard(
               configKey: 'lightLux',
               title: 'Освещённость',
-              value: '${_mqtt.lightLux} лк',
+              value: luxOn ? '${_mqtt.lightLux} лк' : 'Отключён',
               icon: Icons.wb_sunny,
             ),
             _buildSensorCard(
               configKey: 'co2',
               title: 'Газ / CO₂ (MQ135)',
-              value: '${_mqtt.co2Level} ppm',
+              value: co2On ? '${_mqtt.co2Level} ppm' : 'Отключён',
               icon: Icons.air,
             ),
             _buildStaticInfoCard(
@@ -470,7 +487,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text(
-              'ПРИВОДЫ ОКОН И ДВЕРЕЙ (0–180°)',
+              'ПРИВОДЫ ОКОН И ДВЕРЕЙ',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
@@ -499,28 +516,28 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
           label: 'Левое окно крыши',
           angle: _mqtt.roofLeftAngle,
           maxAngle: _mqtt.maxRoofAngleLimit,
-          onChanged: (v) => _mqtt.setRoofLeftAngle(v, log: false),
+          onChanged: (v) => _mqtt.previewRoofLeftAngle(v),
           onChangeEnd: (v) => _mqtt.setRoofLeftAngle(v, log: true),
         ),
         _buildServoCard(
           label: 'Правое окно крыши',
           angle: _mqtt.roofRightAngle,
           maxAngle: _mqtt.maxRoofAngleLimit,
-          onChanged: (v) => _mqtt.setRoofRightAngle(v, log: false),
+          onChanged: (v) => _mqtt.previewRoofRightAngle(v),
           onChangeEnd: (v) => _mqtt.setRoofRightAngle(v, log: true),
         ),
         _buildServoCard(
           label: 'Передняя дверь',
           angle: _mqtt.doorFrontAngle,
           maxAngle: _mqtt.maxDoorAngleLimit,
-          onChanged: (v) => _mqtt.setDoorFrontAngle(v, log: false),
+          onChanged: (v) => _mqtt.previewDoorFrontAngle(v),
           onChangeEnd: (v) => _mqtt.setDoorFrontAngle(v, log: true),
         ),
         _buildServoCard(
           label: 'Задняя дверь',
           angle: _mqtt.doorBackAngle,
           maxAngle: _mqtt.maxDoorAngleLimit,
-          onChanged: (v) => _mqtt.setDoorBackAngle(v, log: false),
+          onChanged: (v) => _mqtt.previewDoorBackAngle(v),
           onChangeEnd: (v) => _mqtt.setDoorBackAngle(v, log: true),
         ),
       ],
@@ -563,7 +580,6 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
         child: Column(
           children: [
             if (isError)
-              // Красный восклицательный знак в круге при таймауте 7.5 сек
               const Icon(
                 Icons.error_outline,
                 size: 26,
@@ -613,7 +629,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
-  // ==================== ВКЛАДКА 2: ПОЛНОЦЕННЫЕ ГИБКИЕ СЦЕНАРИИ ====================
+  // ==================== ВКЛАДКА 2: СЦЕНАРИИ ====================
   Widget _buildScenariosTab() {
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -765,7 +781,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
-  // ==================== ПОЛНЫЙ РЕДАКТОР СЦЕНАРИЕВ ====================
+  // ==================== РЕДАКТОР СЦЕНАРИЕВ ====================
   void _openRuleEditor(AutomationRule? existing) {
     final nameCtrl = TextEditingController(
       text: existing?.name ?? 'Новый сценарий',
@@ -938,25 +954,25 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                                     items: const [
                                       DropdownMenuItem(
                                           value: 'roofAngle',
-                                          child: Text('Оба окна крыши (0–180°)')),
+                                          child: Text('Оба окна крыши')),
                                       DropdownMenuItem(
                                           value: 'doorAngle',
-                                          child: Text('Обе двери (0–180°)')),
+                                          child: Text('Обе двери')),
                                       DropdownMenuItem(
                                           value: 'roofLeft',
-                                          child: Text('Левое окно крыши (0–180°)')),
+                                          child: Text('Левое окно крыши')),
                                       DropdownMenuItem(
                                           value: 'roofRight',
-                                          child: Text('Правое окно крыши (0–180°)')),
+                                          child: Text('Правое окно крыши')),
                                       DropdownMenuItem(
                                           value: 'doorFront',
-                                          child: Text('Передняя дверь (0–180°)')),
+                                          child: Text('Передняя дверь')),
                                       DropdownMenuItem(
                                           value: 'doorBack',
-                                          child: Text('Задняя дверь (0–180°)')),
+                                          child: Text('Задняя дверь')),
                                       DropdownMenuItem(
                                           value: 'allServos',
-                                          child: Text('Все 4 сервопривода (0–180°)')),
+                                          child: Text('Все 4 сервопривода')),
                                       DropdownMenuItem(
                                           value: 'pump',
                                           child: Text('Помпа полива (ВКЛ/ВЫКЛ)')),
@@ -1236,7 +1252,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
     );
   }
 
-  // ==================== ВКЛАДКА 3: СИСТЕМА, АДМИНКА (С ПЬЕЗО ПРИ ОШИБКЕ) И ЛОГИ ====================
+  // ==================== ВКЛАДКА 3: СИСТЕМА, АДМИНКА (С ОТКЛЮЧЕНИЕМ ДАТЧИКОВ) И ЛОГИ ====================
   Widget _buildSettingsAndLogsTab() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -1309,7 +1325,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
         ),
         const SizedBox(height: 16),
 
-        // Блок администратора (при неверном пароле ESP32 пищит 4 раза с задержкой 0.2с)
+        // Блок администратора (лимиты углов + отключение отсутствующих в схеме датчиков)
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -1374,6 +1390,45 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                   onChanged: (v) =>
                       _mqtt.setServoLimits(_mqtt.maxRoofAngleLimit, v),
                 ),
+                const Divider(height: 24, color: Colors.white10),
+                const Text(
+                  'АКТИВНЫЕ ДАТЧИКИ В СХЕМЕ (ОТКЛЮЧЕНИЕ ТРЕВОГИ)',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF00E676),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Отключите датчики, которых сейчас нет в плате, чтобы они не вызывали тревогу и ошибку.',
+                  style: TextStyle(fontSize: 11, color: Colors.white54),
+                ),
+                const SizedBox(height: 6),
+                ..._mqtt.sensorConfigs.entries.map((entry) {
+                  final cfg = entry.value;
+                  return SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    activeThumbColor: const Color(0xFF00E676),
+                    title: Text(
+                      cfg.name,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: cfg.isEnabled ? Colors.white : Colors.white38,
+                      ),
+                    ),
+                    subtitle: Text(
+                      cfg.isEnabled ? 'Включён (контроль порога активен)' : 'Отключён (игнорируется)',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: cfg.isEnabled ? Colors.white54 : Colors.orangeAccent,
+                      ),
+                    ),
+                    value: cfg.isEnabled,
+                    onChanged: (val) => _mqtt.toggleSensorEnabled(entry.key, val),
+                  );
+                }),
               ],
             ],
           ),
@@ -1478,7 +1533,8 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
   }) {
     final valColor = _mqtt.getSensorValueColor(configKey);
     final lblColor = _mqtt.getSensorLabelColor(configKey);
-    final thr = _mqtt.sensorConfigs[configKey]?.threshold;
+    final cfg = _mqtt.sensorConfigs[configKey];
+    final isEnabled = cfg?.isEnabled ?? true;
 
     return InkWell(
       onTap: () => _showThresholdSheet(configKey),
@@ -1506,9 +1562,9 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
                     style: TextStyle(fontSize: 12, color: lblColor),
                   ),
                 ),
-                if (thr != null)
+                if (cfg != null && isEnabled)
                   Text(
-                    '(${thr.toInt()})',
+                    '(${cfg.threshold.toInt()})',
                     style: const TextStyle(fontSize: 10, color: Colors.white38),
                   ),
               ],
@@ -1516,7 +1572,7 @@ class _GreenhouseDashboardState extends State<GreenhouseDashboard> {
             Text(
               value,
               style: TextStyle(
-                fontSize: 17,
+                fontSize: isEnabled ? 17 : 14,
                 fontWeight: FontWeight.bold,
                 color: valColor,
               ),
